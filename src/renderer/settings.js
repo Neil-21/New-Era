@@ -1,6 +1,6 @@
 // Settings: appearance, editor, keybindings, plugins.
 // Appearance values are CSS custom properties, so applying them is one style
-// write with no re-render. Everything lives in <vault>/.hermes/settings.json.
+// write with no re-render. Everything lives in <vault>/.new-era/settings.json.
 import { h } from './dbview.js';
 import { label as keyLabel, fromEvent } from './keymap.js';
 
@@ -48,7 +48,7 @@ export class Settings {
   }
 
   async load() {
-    const saved = await window.hermes.settings.get();
+    const saved = await window.newEra.settings.get();
     this.values = { ...DEFAULTS, ...saved };
     this.apply();
     return this.values;
@@ -57,13 +57,13 @@ export class Settings {
   set(patch) {
     this.values = { ...this.values, ...patch };
     this.apply();
-    window.hermes.settings.save(this.values);
+    window.newEra.settings.save(this.values);
   }
 
   reset() {
     this.values = { ...DEFAULTS, plugins: this.values.plugins };
     this.apply();
-    window.hermes.settings.save(this.values);
+    window.newEra.settings.save(this.values);
   }
 
   apply() {
@@ -80,7 +80,7 @@ export class Settings {
     root.style.setProperty('--sidebar-width', v.sidebarWidth + 'px');
     // Repaint the native window buttons to match the theme.
     const css = getComputedStyle(root);
-    window.hermes.setChromeTheme({
+    window.newEra.setChromeTheme({
       color: hex(css.getPropertyValue('--bg-2')) || '#1c1c1c',
       symbolColor: hex(css.getPropertyValue('--text-dim')) || '#9a9a9a',
     });
@@ -305,7 +305,7 @@ export class Settings {
           h('div', { class: 'set-label', text: 'Plugins folder' }),
           h('div', { class: 'set-note', text: 'A folder with main.js exporting { onload(api) }' }),
         ]),
-        h('button', { class: 'btn', text: 'Open folder', onclick: () => window.hermes.plugins.folder() }),
+        h('button', { class: 'btn', text: 'Open folder', onclick: () => window.newEra.plugins.folder() }),
       ]),
     ]);
   }

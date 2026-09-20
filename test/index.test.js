@@ -79,7 +79,7 @@ test('title falls back frontmatter -> h1 -> filename', () => {
 });
 
 function vault() {
-  const v = fs.mkdtempSync(path.join(os.tmpdir(), 'hermes-'));
+  const v = fs.mkdtempSync(path.join(os.tmpdir(), 'new-era-'));
   const w = (p, s) => {
     fs.mkdirSync(path.join(v, path.dirname(p)), { recursive: true });
     fs.writeFileSync(path.join(v, p), s);

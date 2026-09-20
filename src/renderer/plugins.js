@@ -1,6 +1,6 @@
 // Our own plugin system. Not Obsidian's, not Logseq's, no registry.
 // A plugin is a folder with main.js that default-exports { onload(api) }.
-// Drop it in ./plugins or <vault>/.hermes/plugins.
+// Drop it in ./plugins or <vault>/.new-era/plugins.
 export class PluginHost {
   constructor(app) {
     this.app = app;
@@ -36,7 +36,7 @@ export class PluginHost {
         menu: (anchor, items) => host.app.menu(anchor, items),
         editor: () => host.app.editor,
       },
-      vault: window.hermes,
+      vault: window.newEra,
       // Build DOM without every plugin shipping its own helper.
       h: (tag, attrs = {}, kids = []) => {
         const el = document.createElement(tag);
@@ -73,7 +73,7 @@ export class PluginHost {
 
   async loadAll(disabled = []) {
     this.disabled = new Set(disabled);
-    this.available = await window.hermes.plugins.list();
+    this.available = await window.newEra.plugins.list();
     this.commands.clear();
     this.ribbon = [];
     this.views.clear();
@@ -90,7 +90,7 @@ export class PluginHost {
         if (typeof plugin.onload === 'function') await plugin.onload(this.api(meta));
         this.loaded.set(meta.id, { ...meta, plugin });
       } catch (err) {
-        console.error(`[hermes] plugin "${meta.id}" failed to load`, err);
+        console.error(`[new-era] plugin "${meta.id}" failed to load`, err);
         this.app.toast(`Plugin ${meta.id} failed: ${err.message}`);
       }
     }
@@ -110,7 +110,7 @@ export class PluginHost {
 
   emit(event, payload) {
     for (const { fn, plugin } of this.listeners.get(event) || []) {
-      try { fn(payload); } catch (err) { console.error(`[hermes] ${plugin} ${event} handler`, err); }
+      try { fn(payload); } catch (err) { console.error(`[new-era] ${plugin} ${event} handler`, err); }
     }
   }
 

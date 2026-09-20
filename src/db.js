@@ -50,8 +50,8 @@ const OPS = {
 class Index {
   constructor(vault) {
     this.vault = vault;
-    fs.mkdirSync(path.join(vault, '.hermes'), { recursive: true });
-    this.db = new DatabaseSync(path.join(vault, '.hermes', 'index.db'));
+    fs.mkdirSync(path.join(vault, '.new-era'), { recursive: true });
+    this.db = new DatabaseSync(path.join(vault, '.new-era', 'index.db'));
     this.db.exec('PRAGMA journal_mode = WAL');
     this.db.exec(SCHEMA);
   }

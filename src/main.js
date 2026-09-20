@@ -211,7 +211,7 @@ const api = {
       title: 'Export PDF', defaultPath: suggested, filters: [{ name: 'PDF', extensions: ['pdf'] }],
     });
     if (out.canceled) return null;
-    const tmpDir = path.join(app.getPath('temp'), 'hermes-export');
+    const tmpDir = path.join(app.getPath('temp'), 'new-era-export');
     fs.mkdirSync(tmpDir, { recursive: true });
     const tmp = path.join(tmpDir, `p${Date.now()}.html`);
     fs.writeFileSync(tmp, html, 'utf8');
@@ -256,11 +256,11 @@ const api = {
   // Saved database views live in the vault as plain JSON, so they travel with
   // the notes and diff in git like everything else.
   'views:list': () => {
-    try { return JSON.parse(fs.readFileSync(path.join(requireVault().vault, '.hermes', 'views.json'), 'utf8')); }
+    try { return JSON.parse(fs.readFileSync(path.join(requireVault().vault, '.new-era', 'views.json'), 'utf8')); }
     catch { return []; }
   },
   'views:save': (_e, views) => {
-    const f = path.join(requireVault().vault, '.hermes', 'views.json');
+    const f = path.join(requireVault().vault, '.new-era', 'views.json');
     fs.mkdirSync(path.dirname(f), { recursive: true });
     fs.writeFileSync(f, JSON.stringify(views, null, 2));
     return views;
@@ -270,11 +270,11 @@ const api = {
   'settings:get': () => {
     try {
       return JSON.parse(
-        fs.readFileSync(path.join(requireVault().vault, '.hermes', 'settings.json'), 'utf8'));
+        fs.readFileSync(path.join(requireVault().vault, '.new-era', 'settings.json'), 'utf8'));
     } catch { return {}; }
   },
   'settings:save': (_e, values) => {
-    const f = path.join(requireVault().vault, '.hermes', 'settings.json');
+    const f = path.join(requireVault().vault, '.new-era', 'settings.json');
     fs.mkdirSync(path.dirname(f), { recursive: true });
     fs.writeFileSync(f, JSON.stringify(values, null, 2));
     return values;
@@ -287,11 +287,11 @@ const api = {
   },
 
   // Our own plugin system: every folder with a main.js under plugins/ or
-  // <vault>/.hermes/plugins/. No registry, no marketplace, no sandbox escape -
+  // <vault>/.new-era/plugins/. No registry, no marketplace, no sandbox escape -
   // they are local files the user put there.
   'plugins:list': () => {
     const dirs = [path.join(__dirname, '..', 'plugins')];
-    if (ix) dirs.push(path.join(ix.vault, '.hermes', 'plugins'));
+    if (ix) dirs.push(path.join(ix.vault, '.new-era', 'plugins'));
     const found = [];
     for (const dir of dirs) {
       let entries = [];

@@ -71,8 +71,8 @@ export class DatabaseView {
       sort: this.spec.sort,
       search: this.search || null,
     };
-    this.rows = await window.hermes.index.query(q);
-    this.keys = await window.hermes.index.propKeys(q);
+    this.rows = await window.newEra.index.query(q);
+    this.keys = await window.newEra.index.propKeys(q);
     if (!this.spec.columns.length) {
       this.spec.columns = this.keys.slice(0, 4).map((k) => k.key);
     }
@@ -89,7 +89,7 @@ export class DatabaseView {
     const prev = row.props[key];
     if (display(prev) === display(value)) return;
     row.props[key] = value;
-    await window.hermes.note.setProps(row.path, { [key]: value === '' ? undefined : value });
+    await window.newEra.note.setProps(row.path, { [key]: value === '' ? undefined : value });
     this.app.toast(`${key} → ${display(value) || 'empty'}`);
   }
 
@@ -158,7 +158,7 @@ export class DatabaseView {
     const fm = Object.keys(props).length
       ? '---\n' + Object.entries(props).map(([k, v]) => `${k}: ${Array.isArray(v) ? '[' + v.join(', ') + ']' : v}`).join('\n') + '\n---\n\n'
       : '';
-    const note = await window.hermes.note.create(folder + 'Untitled', fm + '# Untitled\n\n');
+    const note = await window.newEra.note.create(folder + 'Untitled', fm + '# Untitled\n\n');
     await this.render();
     this.app.openNote(note.path);
   }
@@ -257,7 +257,7 @@ export class DatabaseView {
       el.replaceChildren(input, list);
       input.focus();
       input.select();
-      const vals = await window.hermes.index.propValues(key, {
+      const vals = await window.newEra.index.propValues(key, {
         folder: this.spec.source.folder || null, tag: this.spec.source.tag || null,
       });
       for (const v of vals) list.append(h('option', { value: v.value }));

@@ -1,4 +1,4 @@
-// Hermes: Obsidian-style vault, Notion-style databases, one window.
+// NEW ERA: Obsidian-style vault, Notion-style databases, one window.
 import '../style.css';
 import { createEditor } from './editor.js';
 import { DatabaseView, h } from './dbview.js';
@@ -8,7 +8,7 @@ import { Settings } from './settings.js';
 import { GraphView } from './graph.js';
 import { Keymap } from './keymap.js';
 
-const hermes = window.hermes;
+const newEra = window.newEra;
 
 const KIND_ICON = {
   image: '\u25a3', video: '\u25b6', audio: '\u266a', doc: '\u25a5',
@@ -39,12 +39,12 @@ class App {
 
   async boot() {
     document.body.append(this.layout());
-    const state = await hermes.vault.current();
+    const state = await newEra.vault.current();
     if (state.vault) await this.setVault(state);
     else this.renderWelcome();
 
-    hermes.on('vault:changed', (p) => this.onVaultChanged(p));
-    hermes.on('command', (cmd) => this.command(cmd));
+    newEra.on('vault:changed', (p) => this.onVaultChanged(p));
+    newEra.on('command', (cmd) => this.command(cmd));
     window.addEventListener('keydown', (e) => this.hotkey(e));
     this.keymap.load(this.settings.values.keys);
     await this.plugins.loadAll(this.settings.values.disabledPlugins || []);
@@ -75,7 +75,7 @@ class App {
     this.el.stabs = tabs;
 
     this.el.crumb = h('div', { class: 'titlebar-crumb' });
-    document.documentElement.dataset.platform = hermes.platform || 'win32';
+    document.documentElement.dataset.platform = newEra.platform || 'win32';
 
     return h('div', { class: 'app' }, [
       // One drag strip across the top. The OS still owns the window buttons on
@@ -125,7 +125,7 @@ class App {
     this.vault = state.vault;
     this.el.vaultName.textContent = state.vault.split(/[\\/]/).pop() || state.vault;
     this.el.vaultName.title = state.vault;
-    this.views = await hermes.views.list();
+    this.views = await newEra.views.list();
     await this.settings.load();
     this.keymap.load(this.settings.values.keys);
     await this.refresh();
@@ -137,13 +137,13 @@ class App {
   }
 
   async vaultMenu(anchor) {
-    const recent = await hermes.vault.recent();
+    const recent = await newEra.vault.recent();
     const short = (p) => p.split(/[\\/]/).pop() || p;
     this.menu(anchor, [
       ...recent.filter((r) => r !== this.vault).slice(0, 5).map((r) => ({
         label: short(r),
         run: async () => {
-          const state = await hermes.vault.open(r);
+          const state = await newEra.vault.open(r);
           if (!state) return this.toast('That vault folder is gone');
           this.tabs = [];
           this.current = null;
@@ -151,7 +151,7 @@ class App {
         },
       })),
       { label: 'Open another vault\u2026', run: () => this.command('vault.pick') },
-      { label: 'Reveal in file manager', run: () => hermes.vault.reveal('.') },
+      { label: 'Reveal in file manager', run: () => newEra.vault.reveal('.') },
       { label: 'Reindex this vault', run: () => this.command('vault.resync') },
     ]);
   }
@@ -161,8 +161,8 @@ class App {
   }
 
   async refresh() {
-    this.notes = await hermes.index.all();
-    this.assets = await hermes.asset.list({});
+    this.notes = await newEra.index.all();
+    this.assets = await newEra.asset.list({});
     // Basename lookup, so an embed keeps working after the file is moved.
     this.assetByName = new Map();
     for (const a of this.assets) {
@@ -199,7 +199,7 @@ class App {
   renderWelcome() {
     this.el.right.replaceChildren();
     this.el.content.replaceChildren(h('div', { class: 'welcome' }, [
-      h('h1', { text: 'Hermes' }),
+      h('h1', { text: 'NEW ERA' }),
       h('p', { text: 'Your notes are plain markdown files. Your databases are queries over them.' }),
       h('button', { class: 'btn btn-primary', text: 'Open a vault folder', onclick: () => this.command('vault.pick') }),
     ]));
@@ -292,7 +292,7 @@ class App {
           oncontextmenu: (e) => { e.preventDefault(); this.noteMenu(e, f.path); },
         }, [h('span', { class: 'tree-dot' }), h('span', { class: 'tree-name', text: f.title })]);
         row.addEventListener('dragstart', (e) => {
-          e.dataTransfer.setData('text/hermes-note', f.path);
+          e.dataTransfer.setData('text/new-era-note', f.path);
           e.dataTransfer.effectAllowed = 'move';
         });
         out.push(row);
@@ -331,7 +331,7 @@ class App {
   // basename, so nothing breaks as long as the filename stays the same.
   dropTarget(el, folder) {
     el.addEventListener('dragover', (e) => {
-      if (!e.dataTransfer.types.includes('text/hermes-note')) return;
+      if (!e.dataTransfer.types.includes('text/new-era-note')) return;
       e.preventDefault();
       e.dataTransfer.dropEffect = 'move';
       el.classList.add('is-drop');
@@ -339,7 +339,7 @@ class App {
     el.addEventListener('dragleave', () => el.classList.remove('is-drop'));
     el.addEventListener('drop', async (e) => {
       el.classList.remove('is-drop');
-      const from = e.dataTransfer.getData('text/hermes-note');
+      const from = e.dataTransfer.getData('text/new-era-note');
       if (!from) return;
       e.preventDefault();
       e.stopPropagation();
@@ -347,7 +347,7 @@ class App {
       const to = folder ? folder + '/' + name : name;
       if (to === from) return;
       try {
-        await hermes.note.rename(from, to);
+        await newEra.note.rename(from, to);
         await this.refresh();
         if (this.current && this.current.path === from) this.openNote(to);
         this.toast('Moved to ' + (folder || 'vault root'));
@@ -369,8 +369,8 @@ class App {
     const name = await this.prompt('Folder name', 'New folder');
     if (!name) return;
     const clean = name.replace(/[\\:*?"<>|]/g, '-');
-    await hermes.folder.create(clean);
-    const note = await hermes.note.create(clean + '/Untitled', '# Untitled\n\n');
+    await newEra.folder.create(clean);
+    const note = await newEra.note.create(clean + '/Untitled', '# Untitled\n\n');
     await this.refresh();
     this.openNote(note.path);
   }
@@ -380,7 +380,7 @@ class App {
       { label: 'New note here', run: async () => {
         const name = await this.prompt('Note name', 'Untitled');
         if (!name) return;
-        const note = await hermes.note.create(folder + '/' + name, '# ' + name + '\n\n');
+        const note = await newEra.note.create(folder + '/' + name, '# ' + name + '\n\n');
         await this.refresh();
         this.openNote(note.path);
       } },
@@ -392,7 +392,7 @@ class App {
         if (!name) return;
         const parent = folder.includes('/') ? folder.slice(0, folder.lastIndexOf('/') + 1) : '';
         try {
-          await hermes.folder.rename(folder, parent + name);
+          await newEra.folder.rename(folder, parent + name);
           await this.refresh();
         } catch (err) { this.toast(err.message); }
       } },
@@ -402,12 +402,12 @@ class App {
 
   // Every non-markdown file in the vault: images, data, video, PDFs.
   async renderMedia(body) {
-    const kinds = await hermes.asset.kinds();
+    const kinds = await newEra.asset.kinds();
     const filter = this.mediaKind || null;
     const list = h('div', { class: 'tree' });
 
     const draw = async () => {
-      const rows = await hermes.asset.list({ kind: filter, search: this.mediaSearch || null });
+      const rows = await newEra.asset.list({ kind: filter, search: this.mediaSearch || null });
       if (!rows.length) {
         list.replaceChildren(h('div', { class: 'muted', text: 'Nothing here yet - paste or drop a file into a note.' }));
         return;
@@ -458,7 +458,7 @@ class App {
       this.dataFile = a.path;
       return this.openPluginView('data-viewer:file');
     }
-    return hermes.asset.open(a.path);
+    return newEra.asset.open(a.path);
   }
 
   assetMenu(anchor, a) {
@@ -466,7 +466,7 @@ class App {
       ? `![[${a.name}]]` : `[${a.name}](${encodeURI(a.path)})`;
     this.menu(anchor, [
       { label: 'Open', run: () => this.openAsset(a) },
-      { label: 'Open with system app', run: () => hermes.asset.open(a.path) },
+      { label: 'Open with system app', run: () => newEra.asset.open(a.path) },
       { label: 'Copy embed for a note', run: async () => {
         await navigator.clipboard.writeText(link);
         this.toast('Copied ' + link);
@@ -476,9 +476,9 @@ class App {
         this.editor.insert(link + '\n');
         return this.toast('Inserted');
       } },
-      { label: 'Reveal in file manager', run: () => hermes.vault.reveal(a.path) },
+      { label: 'Reveal in file manager', run: () => newEra.vault.reveal(a.path) },
       { label: 'Move to trash', run: async () => {
-        await hermes.asset.trash(a.path);
+        await newEra.asset.trash(a.path);
         await this.refresh();
         this.toast('Moved ' + a.name + ' to trash');
       } },
@@ -491,7 +491,7 @@ class App {
       class: 'search-input', placeholder: 'Search all notes…', value: this.lastSearch || '',
       oninput: async (e) => {
         this.lastSearch = e.target.value;
-        const rows = await hermes.index.search(e.target.value);
+        const rows = await newEra.index.search(e.target.value);
         results.replaceChildren(...rows.map((r) => {
           const snip = h('div', { class: 'result-snip' });
           snip.innerHTML = sanitize(r.snip || '');
@@ -507,7 +507,7 @@ class App {
   }
 
   async renderTags(body) {
-    const tags = await hermes.index.tags();
+    const tags = await newEra.index.tags();
     body.replaceChildren(h('div', { class: 'tree' }, tags.map((t) => h('div', {
       class: 'tree-row tree-file', style: '--depth:0',
       onclick: () => this.openDatabase({ name: '#' + t.tag, source: { tag: t.tag }, view: 'table' }, true),
@@ -515,7 +515,7 @@ class App {
   }
 
   async renderBases(body) {
-    const folders = await hermes.index.folders();
+    const folders = await newEra.index.folders();
     body.replaceChildren(
       h('div', { class: 'sidebar-actions' }, [
         h('button', { class: 'btn-ghost', text: '+ New base', onclick: () => this.command('db.new') }),
@@ -598,7 +598,7 @@ class App {
     this.closeGraph();
     this.db = null;
     let note;
-    try { note = await hermes.note.read(path); } catch { return this.toast('Cannot open ' + path); }
+    try { note = await newEra.note.read(path); } catch { return this.toast('Cannot open ' + path); }
     this.current = { type: 'note', path, title: path.split('/').pop().replace(/\.md$/, '') };
     // Remembered separately: opening the graph replaces `current`, and the
     // local graph still needs to know which note it is centred on.
@@ -625,20 +625,20 @@ class App {
       exists: (t) => exists.has(t.toLowerCase()) || existsBase.has(t.toLowerCase()),
       onChange: async (text) => {
         this.dirty = false;
-        await hermes.note.write(path, text);
+        await newEra.note.write(path, text);
         this.renderRight(path);
       },
       asset: (src) => this.assetUrl(src),
       onAttach: async (file) => {
         const bytes = new Uint8Array(await file.arrayBuffer());
-        const saved = await hermes.asset.save(this.attachFolder(path), file.name || 'pasted.png', bytes);
+        const saved = await newEra.asset.save(this.attachFolder(path), file.name || 'pasted.png', bytes);
         await this.refresh();
         this.toast(`Saved ${saved.path}`);
         return saved;
       },
       onAttachError: (err) => this.toast('Could not attach: ' + err.message),
       onLink: (target) => this.followLink(target),
-      onExternal: (url) => hermes.openExternal(url).catch(() => this.toast('Could not open ' + url)),
+      onExternal: (url) => newEra.openExternal(url).catch(() => this.toast('Could not open ' + url)),
     });
     host.addEventListener('input', () => { this.dirty = true; }, true);
 
@@ -663,7 +663,7 @@ class App {
     const hit = this.notes.find((n) => n.path.replace(/\.md$/i, '').toLowerCase() === clean)
       || this.notes.find((n) => n.path.split('/').pop().replace(/\.md$/i, '').toLowerCase() === clean);
     if (hit) return this.openNote(hit.path);
-    const made = await hermes.note.create(target, `# ${target}\n\n`);
+    const made = await newEra.note.create(target, `# ${target}\n\n`);
     await this.refresh();
     this.toast('Created ' + made.path);
     return this.openNote(made.path);
@@ -675,7 +675,7 @@ class App {
     const next = dir + title.trim().replace(/[\\/:*?"<>|]/g, '-') + '.md';
     if (next === path) return;
     try {
-      const r = await hermes.note.rename(path, next);
+      const r = await newEra.note.rename(path, next);
       await this.refresh();
       this.tabs = this.tabs.filter((t) => t.path !== path);
       this.openNote(r.path);
@@ -689,9 +689,9 @@ class App {
         const name = await this.prompt('New name', path.split('/').pop().replace(/\.md$/, ''));
         if (name) this.renameNote(path, name);
       } },
-      { label: 'Reveal in file manager', run: () => hermes.vault.reveal(path) },
+      { label: 'Reveal in file manager', run: () => newEra.vault.reveal(path) },
       { label: 'Move to trash', run: async () => {
-        await hermes.note.trash(path);
+        await newEra.note.trash(path);
         this.tabs = this.tabs.filter((t) => t.path !== path);
         await this.refresh();
         this.renderWelcome();
@@ -702,9 +702,9 @@ class App {
   // --- right rail: properties + backlinks ----------------------------------
 
   async renderRight(path) {
-    const meta = await hermes.note.meta(path);
-    const backs = await hermes.index.backlinks(path);
-    const outs = await hermes.index.outlinks(path);
+    const meta = await newEra.note.meta(path);
+    const backs = await newEra.index.backlinks(path);
+    const outs = await newEra.index.outlinks(path);
     const props = (meta && meta.props) || {};
 
     const rows = Object.entries(props).map(([k, v]) => h('div', { class: 'prop' }, [
@@ -714,8 +714,8 @@ class App {
         onchange: async (e) => {
           const next = Array.isArray(v) ? e.target.value.split(',').map((s) => s.trim()).filter(Boolean)
             : e.target.value;
-          await hermes.note.setProps(path, { [k]: next });
-          if (this.editor) this.editor.setDoc((await hermes.note.read(path)).raw);
+          await newEra.note.setProps(path, { [k]: next });
+          if (this.editor) this.editor.setDoc((await newEra.note.read(path)).raw);
           this.toast(`${k} updated`);
         },
       }),
@@ -728,8 +728,8 @@ class App {
           h('button', { class: 'btn-ghost', text: '+', onclick: async () => {
             const key = await this.prompt('Property name');
             if (!key) return;
-            await hermes.note.setProps(path, { [key]: '' });
-            if (this.editor) this.editor.setDoc((await hermes.note.read(path)).raw);
+            await newEra.note.setProps(path, { [key]: '' });
+            if (this.editor) this.editor.setDoc((await newEra.note.read(path)).raw);
             this.renderRight(path);
           } }),
         ]),
@@ -784,7 +784,7 @@ class App {
     this.renderTabs();
   }
 
-  saveViews() { hermes.views.save(this.views); }
+  saveViews() { newEra.views.save(this.views); }
 
   // --- graph ---------------------------------------------------------------
 
@@ -857,11 +857,11 @@ class App {
       { id: 'note.daily', name: "Open today's daily note", run: () => this.dailyNote() },
       { id: 'db.new', name: 'New database base', run: () => this.newBase() },
       { id: 'vault.pick', name: 'Open vault…', run: async () => {
-        const s = await hermes.vault.pick();
+        const s = await newEra.vault.pick();
         if (s) { this.tabs = []; this.current = null; await this.setVault(s); }
       } },
       { id: 'vault.resync', name: 'Reindex vault', run: async () => {
-        const s = await hermes.vault.resync();
+        const s = await newEra.vault.resync();
         await this.refresh();
         this.toast(`Indexed ${s.total} notes, ${s.links} links`);
       } },
@@ -886,7 +886,7 @@ class App {
         const btn = document.querySelector('.page-adders .add-btn:last-child, .cover-tools .chip-btn');
         if (btn) btn.click(); else this.toast('Open a note first');
       } },
-      { id: 'plugins.folder', name: 'Open plugins folder', run: () => hermes.plugins.folder() },
+      { id: 'plugins.folder', name: 'Open plugins folder', run: () => newEra.plugins.folder() },
     ];
   }
 
@@ -931,7 +931,7 @@ class App {
     const name = await this.prompt('Note name', 'Untitled');
     if (!name) return;
     const folder = this.settings.values.newNoteFolder;
-    const note = await hermes.note.create((folder ? folder + '/' : '') + name, `# ${name}\n\n`);
+    const note = await newEra.note.create((folder ? folder + '/' : '') + name, `# ${name}\n\n`);
     await this.refresh();
     this.openNote(note.path);
   }
@@ -943,7 +943,7 @@ class App {
     const path = `${folder}/${iso}.md`;
     const known = this.notes.find((n) => n.path === path);
     if (known) return this.openNote(path);
-    await hermes.note.create(path, `---\ndate: ${iso}\n---\n\n# ${iso}\n\n`);
+    await newEra.note.create(path, `---\ndate: ${iso}\n---\n\n# ${iso}\n\n`);
     await this.refresh();
     return this.openNote(path);
   }
@@ -951,7 +951,7 @@ class App {
   async newBase() {
     const name = await this.prompt('Base name', 'Projects');
     if (!name) return;
-    const folders = await hermes.index.folders();
+    const folders = await newEra.index.folders();
     const folder = folders.find((f) => f.folder.toLowerCase() === name.toLowerCase());
     this.openDatabase({
       name, icon: '▦', view: 'table',

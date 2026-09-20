@@ -1,0 +1,1 @@
+{ "id": "templates", "name": "Templates", "description": "Insert a note from Templates/ at the cursor, with {{date}} and {{title}} filled in." }

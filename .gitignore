@@ -1,0 +1,5 @@
+node_modules/
+src/renderer.bundle.js
+src/renderer.bundle.css
+logseq/
+demo-vault/.hermes/index.db*

@@ -1,0 +1,5 @@
+{
+  "id": "word-count",
+  "name": "Word Count",
+  "description": "Example plugin: word count and reading time for the open note."
+}

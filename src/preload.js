@@ -3,7 +3,7 @@ const { contextBridge, ipcRenderer } = require('electron');
 
 const call = (ch) => (...args) => ipcRenderer.invoke(ch, ...args);
 
-contextBridge.exposeInMainWorld('hermes', {
+contextBridge.exposeInMainWorld('newEra', {
   platform: process.platform,
   vault: {
     current: call('vault:current'),

@@ -88,7 +88,7 @@ export class GraphView {
   }
 
   async load() {
-    const g = await window.hermes.index.graph({ includeTags: this.showTags });
+    const g = await window.newEra.index.graph({ includeTags: this.showTags });
     let { nodes, edges } = g;
 
     if (this.mode === 'local') {

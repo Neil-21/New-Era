@@ -1,5 +1,5 @@
-// Example Hermes plugin. Copy this folder to start your own.
-// Lives in ./plugins or <vault>/.hermes/plugins. No build step, no registry.
+// Example NEW ERA plugin. Copy this folder to start your own.
+// Lives in ./plugins or <vault>/.new-era/plugins. No build step, no registry.
 export default {
   async onload(api) {
     const count = async () => {

@@ -10,7 +10,7 @@ export function renderPageHeader(opts) {
   const icon = props.icon;
 
   const set = async (patch) => {
-    await window.hermes.note.setProps(path, patch);
+    await window.newEra.note.setProps(path, patch);
     await app.reloadCurrentNote();
   };
 

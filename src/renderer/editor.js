@@ -135,7 +135,7 @@ const FRAMERS = [
   [/youtube\.com\/embed\/[\w-]+/, (m) => 'https://' + m[0].replace(/^https?:\/\//, ''), '16/9'],
   [/vimeo\.com\/(\d+)/, (m) => `https://player.vimeo.com/video/${m[1]}`, '16/9'],
   [/open\.spotify\.com\/(track|album|playlist|episode)\/(\w+)/, (m) => `https://open.spotify.com/embed/${m[1]}/${m[2]}`, '4/1'],
-  [/figma\.com\/(file|design|proto|board)\/[\w/-]+/, (m) => `https://www.figma.com/embed?embed_host=hermes&url=https://${m[0].replace(/^https?:\/\//, '')}`, '16/10'],
+  [/figma\.com\/(file|design|proto|board)\/[\w/-]+/, (m) => `https://www.figma.com/embed?embed_host=new-era&url=https://${m[0].replace(/^https?:\/\//, '')}`, '16/10'],
   [/codepen\.io\/([\w-]+)\/pen\/([\w-]+)/, (m) => `https://codepen.io/${m[1]}/embed/${m[2]}?default-tab=result`, '4/3'],
   [/loom\.com\/share\/(\w+)/, (m) => `https://www.loom.com/embed/${m[1]}`, '16/9'],
   [/docs\.google\.com\/[\w/.-]+/, (m) => 'https://' + m[0].replace(/^https?:\/\//, '') + '?embedded=true', '4/3'],

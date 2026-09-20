@@ -1,10 +1,10 @@
-# Hermes
+# NEW ERA
 
 Obsidian's editing model and Notion's databases in one app, over the same files.
 
 - **Your notes are plain markdown** in a folder you own. Wikilinks, frontmatter, tasks, live preview.
 - **Your databases are queries** over those files. A property is a frontmatter key. Editing a table cell or dragging a board card rewrites the `.md` file.
-- **SQLite is an index, not the truth.** Delete `.hermes/index.db` and it rebuilds from the files.
+- **SQLite is an index, not the truth.** Delete `.new-era/index.db` and it rebuilds from the files.
 - **Pages look like Notion pages.** Cover banners, page icons, callouts, web embeds, a `/` block menu.
 - **A graph of the whole vault**, or just the note you are on.
 - **Files live in the vault.** Paste or drop an image, video, PDF or spreadsheet and it is
@@ -66,13 +66,13 @@ Nothing to compile, nothing to rebuild per platform.
 
 ## System architecture
 
-Hermes uses Electron's process boundary to keep filesystem access out of the
+NEW ERA uses Electron's process boundary to keep filesystem access out of the
 editor. Markdown files remain the source of truth; the SQLite database is a
 rebuildable search and query index.
 
 ```
                          vault folder
-              .md notes + attachments + .hermes settings
+              .md notes + attachments + .new-era settings
                                │
                                ▼
 ┌─────────────────────────────────────────────────────────────────┐
@@ -104,7 +104,7 @@ rebuildable search and query index.
 3. Edits are written back as Markdown, then the watcher refreshes the index.
 4. Plugins use the same limited application API for commands, views, exports,
    and vault actions.
-5. Deleting `.hermes/index.db` is safe: Hermes reconstructs it from the vault.
+5. Deleting `.new-era/index.db` is safe: NEW ERA reconstructs it from the vault.
 
 ## Writing
 
@@ -189,14 +189,14 @@ The sort button offers A→Z, Z→A and recently edited.
   on one chord.
 - **Plugins** — enable or disable, with what each one registers.
 
-All of it in `<vault>/.hermes/settings.json`.
+All of it in `<vault>/.new-era/settings.json`.
 
 The window uses a hidden title bar with a native overlay: we draw the header,
 the OS keeps the window buttons, snap layouts and rounded corners.
 
 ## Databases
 
-A base is a saved query, stored in `<vault>/.hermes/views.json` so it travels
+A base is a saved query, stored in `<vault>/.new-era/views.json` so it travels
 with your notes and diffs in git:
 
 ```json
@@ -226,12 +226,12 @@ of them in **Settings → Plugins**.
 | **Tasks** | Every `- [ ]` in the vault, grouped by note or by date. Ticking one rewrites that line in its own file. Ignores `Templates/` by default. |
 | **Outline** | The current note's headings in the right panel; click to jump. |
 | **Templates** | Insert a note from `Templates/` at the cursor, filling `{{date}}`, `{{date:+1}}`, `{{time}}`, `{{title}}`, `{{path}}`. |
-| **Data viewer** | Opens `.json`, `.csv`, `.tsv` and `.xlsx` from the vault — spreadsheets as sortable tables with a sheet switcher and *copy as markdown*, JSON as a collapsible tree. Legacy `.xls` files open externally; re-save them as `.xlsx` to preview them safely in Hermes. |
+| **Data viewer** | Opens `.json`, `.csv`, `.tsv` and `.xlsx` from the vault — spreadsheets as sortable tables with a sheet switcher and *copy as markdown*, JSON as a collapsible tree. Legacy `.xls` files open externally; re-save them as `.xlsx` to preview them safely in NEW ERA. |
 | **Export** | The open note to PDF or standalone HTML, with its cover, properties, callouts, tables and images. PDF goes through Chromium's own print engine. |
 | **Random note** | Opens one. Good for rediscovering what you wrote. |
 | **Word count** | Words and reading time for the open note. |
 
-Drop your own folder in `plugins/` or `<vault>/.hermes/plugins/`. See
+Drop your own folder in `plugins/` or `<vault>/.new-era/plugins/`. See
 [plugins/word-count](plugins/word-count/main.js) for the smallest one and
 [plugins/kanban](plugins/kanban/main.js) for a full view.
 

@@ -64,6 +64,48 @@ you changed and leaves every other byte of the file alone.
 **No native modules.** SQLite is `node:sqlite`, built into Electron's Node.
 Nothing to compile, nothing to rebuild per platform.
 
+## System architecture
+
+Hermes uses Electron's process boundary to keep filesystem access out of the
+editor. Markdown files remain the source of truth; the SQLite database is a
+rebuildable search and query index.
+
+```
+                         vault folder
+              .md notes + attachments + .hermes settings
+                               │
+                               ▼
+┌─────────────────────────────────────────────────────────────────┐
+│ Main process                                                      │
+│                                                                   │
+│  main.js  ── IPC boundary, file watching, safe vault paths       │
+│  db.js    ── Markdown scan → SQLite / FTS / links / assets       │
+│  parse.js ── Frontmatter and link parsing                         │
+│  sheet.js ── CSV, TSV and XLSX parsing                            │
+└───────────────────────────┬─────────────────────────────────────┘
+                            │ validated IPC calls and events
+                            ▼
+┌─────────────────────────────────────────────────────────────────┐
+│ Renderer                                                          │
+│                                                                   │
+│  app.js     ── workspace state, navigation, tabs and commands    │
+│  editor.js  ── CodeMirror editor, preview, embeds and attachments│
+│  dbview.js  ── table, board and gallery views                     │
+│  plugins.js ── constrained plugin API and lifecycle               │
+│  settings.js/keymap.js ── per-vault preferences and shortcuts    │
+└─────────────────────────────────────────────────────────────────┘
+```
+
+### Data flow
+
+1. Opening a vault scans notes and attachments into the SQLite index.
+2. The renderer requests indexed data through the preload bridge; it never
+   receives direct Node.js filesystem access.
+3. Edits are written back as Markdown, then the watcher refreshes the index.
+4. Plugins use the same limited application API for commands, views, exports,
+   and vault actions.
+5. Deleting `.hermes/index.db` is safe: Hermes reconstructs it from the vault.
+
 ## Writing
 
 Live preview keeps the markdown in the file and hides the syntax unless your

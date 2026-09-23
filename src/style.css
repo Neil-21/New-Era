@@ -238,11 +238,44 @@ body.no-sidebar .sidebar { display: none; }
 .vault-name::after { content: ' ⌄'; color: var(--text-faint); font-weight: 400; }
 .vault-name:hover { background: var(--bg-hover); }
 
-.stabs {
+.side-toolbar {
   display: flex;
-  gap: 2px;
+  align-items: center;
+  gap: 4px;
   padding: 10px 10px 8px;
 }
+.side-toolbar .spacer { flex: 1; }
+.tool-btn {
+  background: var(--bg-3);
+  border: 1px solid transparent;
+  border-radius: var(--r-sm);
+  padding: 4px 9px;
+  font-size: 12px;
+  color: var(--text-dim);
+  white-space: nowrap;
+  transition: background .12s var(--ease), color .12s var(--ease);
+}
+.tool-btn:hover { background: var(--bg-4); color: var(--text-strong); }
+.tool-icon { padding: 4px 7px; }
+
+.side-head {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  padding: 13px 10px 4px;
+  cursor: pointer;
+  user-select: none;
+  color: var(--text-faint);
+}
+.side-head:hover { color: var(--text); }
+.side-head-label {
+  font-size: 10.5px;
+  font-weight: 700;
+  letter-spacing: .09em;
+  text-transform: uppercase;
+  flex: 1;
+}
+.side-head .twisty { font-size: 8px; }
 .stab {
   flex: 1;
   min-width: 0;
@@ -1222,6 +1255,17 @@ body.no-rail .rightbar { display: none; }
   color: var(--text-faint);
 }
 .omni-label { flex: 1; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.omni-snip {
+  flex: 2;
+  min-width: 0;
+  font-size: 12px;
+  color: var(--text-faint);
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
+.omni-snip mark { background: var(--selection); color: var(--text-strong); border-radius: 3px; }
+
 .omni-key {
   font-family: var(--font-mono);
   font-size: 11px;

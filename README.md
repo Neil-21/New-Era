@@ -152,6 +152,7 @@ everything at once and groups what it finds:
 
 ```
 Notes        the note titles and their folders
+In note text full-text search, with the matching line
 Files        attachments, by name and extension
 Tags         every #tag, opening as a table
 Bases        your saved database views
@@ -201,12 +202,24 @@ nodes of their own.
 
 It is canvas plus a ~40 line force simulation - no graph library.
 
-## Files and folders
+## The sidebar
+
+One tree, not a row of tabs. Every section collapses and remembers that it
+did:
+
+```
+Notes    the folder tree, with counts
+Views    saved bases, then every folder as a table
+Tools    the graph and whatever your plugins registered
+Tags     every tag, from #inline ones and from `tags:` in frontmatter
+Files    attachments
+```
 
 Folders sort above notes and carry a note count. Drag a note onto a folder to
 move it on disk; links keep resolving because they match on basename. Right
-click a folder for *new note here*, *open as table*, *rename*, *collapse all*.
-The sort button offers A→Z, Z→A and recently edited.
+click a folder for *new note here*, *open as table* or *rename*, and a note for
+rename, reveal and trash. The `⇅` button holds sorting (A→Z, Z→A, recently
+edited), whether attachments show inline in the tree, and collapse everything.
 
 ## Settings
 
@@ -310,6 +323,18 @@ markdown-to-HTML renderer (including escaping), and the xlsx reader — which is
 tested against a zip this suite builds byte by byte, stored and deflated
 members included.
 
+## Two things the index does quietly
+
+**A note's title** comes from `title:` in frontmatter, then its first `#`
+heading, then its filename — but a heading still holding a template token like
+`{{title}}` is skipped, so `Templates/Meeting.md` is called *Meeting* rather
+than `{{title}}`.
+
+**The index knows which parser wrote it.** `sync()` only re-reads files whose
+mtime moved, so a change to how notes are parsed would never reach notes you
+have not edited since. A version stamp in the index catches that and rebuilds
+from the files on the next open.
+
 ## Not built yet
 
 Inline PDF preview, per-view column widths, relation and rollup properties,
@@ -326,7 +351,7 @@ The plan was to build on `logseq/logseq`. Two reasons it isn't:
    data model, the editor and the renderer, which is most of the app.
 2. It is ~500k lines of ClojureScript with its own build toolchain.
 
-What you see above is ~5,600 lines of JavaScript. Runtime dependencies:
+What you see above is ~5,700 lines of JavaScript. Runtime dependencies:
 CodeMirror. Build dependencies: Electron and esbuild. That is the whole list.
 The clone under `logseq/` is reference material only - nothing imports from it.
 Logseq's good ideas are here anyway: a queryable index over plain files, and

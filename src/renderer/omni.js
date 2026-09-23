@@ -14,9 +14,10 @@ export const SCOPES = [
   { key: '/', kind: 'setting', label: 'Settings' },
 ];
 
-const ORDER = ['note', 'file', 'tag', 'base', 'tool', 'setting', 'command', 'create'];
+const ORDER = ['note', 'text', 'file', 'tag', 'base', 'tool', 'setting', 'command', 'create'];
 const GROUP = {
   note: 'Notes',
+  text: 'In note text',
   file: 'Files',
   tag: 'Tags',
   base: 'Bases',
@@ -26,7 +27,7 @@ const GROUP = {
   create: 'Create',
 };
 const ICON = {
-  note: '▤', file: '▣', tag: '#', base: '▦',
+  note: '▤', text: '“', file: '▣', tag: '#', base: '▦',
   tool: '◍', setting: '⚙', command: '⌘', create: '+',
 };
 
@@ -53,10 +54,17 @@ export function score(query, text, weight = 1) {
   return Math.max(4, (30 - gaps * 2)) * weight;
 }
 
+function sanitize(html) {
+  return String(html)
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;')
+    .replace(/&lt;mark&gt;/g, '<mark>').replace(/&lt;\/mark&gt;/g, '</mark>');
+}
+
 export class Omni {
   constructor(app) {
     this.app = app;
     this.recent = [];
+    this.seq = 0; // guards against a slow search overwriting a newer one
   }
 
   remember(entry) {
@@ -197,6 +205,28 @@ export class Omni {
       }
       sel = 0;
       paint();
+
+      // Titles match instantly from memory; the body search is a round trip to
+      // SQLite, so it lands a moment later and is merged in then.
+      const token = ++this.seq;
+      if (q.length > 1 && (!scope || scope.kind === 'note')) {
+        window.newEra.index.search(q, 8).then((rows) => {
+          if (token !== this.seq || !rows.length) return;
+          const already = new Set(shown.filter((e) => e.kind === 'note').map((e) => e.id));
+          const extra = rows
+            .filter((r) => !already.has('note:' + r.path))
+            .map((r) => ({
+              kind: 'text', id: 'text:' + r.path, label: r.title,
+              hint: r.path, snippet: r.snip,
+              run: () => app.openNote(r.path),
+            }));
+          if (!extra.length) return;
+          // Real hits in the note text mean this is not a dead end, so the
+          // offer to create a note is no longer the useful answer.
+          shown = [...shown.filter((e) => e.kind !== 'create'), ...extra];
+          paint();
+        }).catch(() => { /* a half-typed FTS query is not an error */ });
+      }
     };
 
     const paint = () => {
@@ -223,6 +253,11 @@ export class Omni {
         }, [
           h('span', { class: 'omni-ico', text: ICON[e.kind] || '▪' }),
           h('span', { class: 'omni-label', text: e.label }),
+          e.snippet ? (() => {
+            const snip = h('span', { class: 'omni-snip' });
+            snip.innerHTML = sanitize(e.snippet);
+            return snip;
+          })() : null,
           e.key ? h('span', { class: 'omni-key', text: keyLabel(e.key) }) : null,
           h('span', { class: 'hint', text: e.hint || '' }),
         ]));

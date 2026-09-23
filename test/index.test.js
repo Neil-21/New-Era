@@ -4,7 +4,9 @@ const assert = require('node:assert');
 const fs = require('node:fs');
 const os = require('node:os');
 const path = require('node:path');
-const { parseFrontmatter, setFrontmatter, parseLinks, titleOf } = require('../src/parse.js');
+const {
+  parseFrontmatter, setFrontmatter, parseLinks, frontmatterTags, titleOf,
+} = require('../src/parse.js');
 const { Index } = require('../src/db.js');
 
 test('frontmatter: scalars, inline lists, block lists', () => {
@@ -174,4 +176,68 @@ test('a fresh vault is untouched by the migration path', (t) => {
   t.after(() => { ix.close(); fs.rmSync(v, { recursive: true, force: true }); });
   assert.ok(fs.existsSync(path.join(v, '.new-era')));
   assert.strictEqual(ix.sync().total, 3);
+});
+
+test('a template heading does not become the note title', () => {
+  // Templates hold `# {{title}}` until they are used; the filename is a better
+  // name than the raw token.
+  assert.strictEqual(titleOf('Templates/Meeting.md', {}, '# {{title}}\n\nnotes'), 'Meeting');
+  assert.strictEqual(titleOf('Templates/Project.md', { title: '{{title}}' }, '# {{title}}'), 'Project');
+  assert.strictEqual(titleOf('Templates/Standup.md', {}, '# {{date}} standup'), 'Standup');
+  // A real heading still wins over the filename.
+  assert.strictEqual(titleOf('Notes/untitled-3.md', {}, '# Real heading'), 'Real heading');
+  assert.strictEqual(titleOf('Notes/x.md', { title: 'From frontmatter' }, '# H1'), 'From frontmatter');
+});
+
+test('a parser change rebuilds notes that have not been touched', (t) => {
+  const v = vault();
+  const first = new Index(v);
+  first.sync();
+  // Pretend the index was written by an older parser.
+  first.db.prepare("UPDATE meta SET value = 'stale' WHERE key = 'parser'").run();
+  first.db.prepare("UPDATE notes SET title = 'WRONG'").run();
+  first.close();
+
+  const second = new Index(v);
+  t.after(() => { second.close(); fs.rmSync(v, { recursive: true, force: true }); });
+
+  assert.strictEqual(second.all().length, 0, 'stale rows are dropped on open');
+  assert.strictEqual(second.sync().changed, 3, 'and every note is re-read');
+  assert.ok(!second.all().some((n) => n.title === 'WRONG'), 'no stale titles survive');
+
+  // Opening again with the same parser must not throw the index away.
+  second.close();
+  const third = new Index(v);
+  assert.strictEqual(third.all().length, 3, 'a matching version keeps the index');
+  assert.strictEqual(third.sync().changed, 0);
+  third.close();
+});
+
+test('frontmatter tags count as tags, like inline ones', () => {
+  assert.deepStrictEqual(frontmatterTags({ tags: ['demo', 'research'] }), ['demo', 'research']);
+  assert.deepStrictEqual(frontmatterTags({ tags: 'demo, research' }), ['demo', 'research']);
+  assert.deepStrictEqual(frontmatterTags({ tags: '#demo' }), ['demo'], 'a leading # is optional');
+  assert.deepStrictEqual(frontmatterTags({ tag: 'single' }), ['single']);
+  assert.deepStrictEqual(frontmatterTags({}), []);
+  assert.deepStrictEqual(frontmatterTags({ tags: '' }), []);
+  assert.deepStrictEqual(frontmatterTags({ tags: ['a', 'a'] }), ['a'], 'no duplicates');
+});
+
+test('index: a note tagged only in frontmatter is findable by that tag', (t) => {
+  const v = vault();
+  fs.writeFileSync(path.join(v, 'Welcome.md'), '---\ntags: [demo, research]\n---\n\n# Welcome\n');
+  const ix = new Index(v);
+  t.after(() => { ix.close(); fs.rmSync(v, { recursive: true, force: true }); });
+  ix.sync();
+
+  const tags = Object.fromEntries(ix.tags().map((t2) => [t2.tag, t2.n]));
+  assert.strictEqual(tags.demo, 1);
+  assert.strictEqual(tags.research, 1);
+  assert.strictEqual(tags.ml, 1, 'inline #tags still work');
+  assert.deepStrictEqual(ix.query({ tag: 'demo' }).map((r) => r.title), ['Welcome']);
+
+  // A tag in both places must not double-count.
+  fs.writeFileSync(path.join(v, 'Welcome.md'), '---\ntags: [demo]\n---\n\n# Welcome\n\n#demo\n');
+  ix.sync();
+  assert.strictEqual(ix.tags().find((t2) => t2.tag === 'demo').n, 1, 'counted once, not twice');
 });

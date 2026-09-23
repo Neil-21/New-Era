@@ -154,7 +154,7 @@ export default {
     api.addView({ id: 'file', name: 'Data viewer', mount });
     api.addRibbon({
       icon: '☷', title: 'Data files',
-      run: () => { api.app.openSidebarTab('media'); },
+      run: () => api.app.revealSection('Files'),
     });
   },
 };

@@ -108,11 +108,33 @@ function parseLinks(body) {
   return links;
 }
 
-function titleOf(path, data, body) {
-  if (data && data.title) return String(data.title);
-  const h = body.match(/^#\s+(.+)$/m);
-  if (h) return h[1].trim();
-  return path.split('/').pop().replace(/\.md$/i, '');
+// A template's heading is `# {{title}}` until it is used, and an unsubstituted
+// token is a worse name than the filename it sits in.
+const TOKEN = /\{\{[^}]*\}\}/;
+
+// `tags: [a, b]` in frontmatter means the same thing as `#a #b` in the body,
+// which is how everyone writes them, so both have to reach the tag index.
+function frontmatterTags(data) {
+  const out = [];
+  for (const key of ['tags', 'tag']) {
+    const v = data && data[key];
+    if (v === undefined || v === null || v === '') continue;
+    for (const one of Array.isArray(v) ? v : String(v).split(/[,\s]+/)) {
+      const name = String(one).trim().replace(/^#/, '');
+      if (name && !out.includes(name)) out.push(name);
+    }
+  }
+  return out;
 }
 
-module.exports = { parseFrontmatter, setFrontmatter, parseLinks, titleOf, dump, scalar };
+function titleOf(path, data, body) {
+  const name = path.split('/').pop().replace(/\.md$/i, '');
+  if (data && data.title && !TOKEN.test(String(data.title))) return String(data.title);
+  const h = body.match(/^#\s+(.+)$/m);
+  if (h && !TOKEN.test(h[1])) return h[1].trim();
+  return name;
+}
+
+module.exports = {
+  parseFrontmatter, setFrontmatter, parseLinks, frontmatterTags, titleOf, dump, scalar,
+};

@@ -25,7 +25,7 @@ export class PluginHost {
         openView: (spec) => host.app.openDatabase(spec),
         openGraph: (mode) => host.app.openGraph(mode),
         openViewById: (id) => host.app.openPluginView(id),
-        openSidebarTab: (tab) => { host.app.sidebarTab = tab; host.app.renderSidebar(); },
+        revealSection: (name) => host.app.revealSection(name),
         runCommand: (id) => host.app.command(id),
         assetUrl: (src) => host.app.assetUrl(src),
         get dataFile() { return host.app.dataFile; },

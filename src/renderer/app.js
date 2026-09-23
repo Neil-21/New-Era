@@ -32,7 +32,6 @@ class App {
     this.tabs = [];
     this.current = null;
     this.editor = null;
-    this.sidebarTab = 'files';
     this.collapsed = new Set();
     this.plugins = new PluginHost(this);
     this.settings = new Settings(this);
@@ -70,13 +69,6 @@ class App {
       toast: h('div', { class: 'toast-wrap' }),
     };
 
-    const tabs = ['files', 'search', 'tags', 'bases', 'media'].map((t) => h('button', {
-      class: 'stab',
-      text: { files: 'Notes', search: 'Search', tags: 'Tags', bases: 'Views', media: 'Files' }[t],
-      'data-tab': t,
-      onclick: () => { this.sidebarTab = t; this.renderSidebar(); },
-    }));
-    this.el.stabs = tabs;
 
     this.el.crumbText = h('span', { class: 'crumb-text', text: 'Search notes, files, settings\u2026' });
     this.el.crumb = h('button', {
@@ -112,7 +104,7 @@ class App {
         ]),
       ]),
       h('aside', { class: 'sidebar' }, [
-        h('div', { class: 'stabs' }, tabs),
+        this.toolbar(),
         this.el.sidebar,
         // Vault switcher and settings live at the bottom, out of the way of the
         // thing you actually came here to do.
@@ -182,7 +174,8 @@ class App {
         this.assetByName.set(a.name.toLowerCase(), a.path);
       }
     }
-    this.tags = null;
+    this.tags = await newEra.index.tags();
+    this.folders = await newEra.index.folders();
     this.renderSidebar();
   }
 
@@ -224,22 +217,84 @@ class App {
 
   // --- sidebar -------------------------------------------------------------
 
-  renderSidebar() {
-    for (const t of this.el.stabs) t.classList.toggle('is-active', t.dataset.tab === this.sidebarTab);
-    const body = this.el.sidebar;
-    if (this.sidebarTab === 'files') return this.renderFiles(body);
-    if (this.sidebarTab === 'search') return this.renderSearch(body);
-    if (this.sidebarTab === 'tags') return this.renderTags(body);
-    if (this.sidebarTab === 'media') return this.renderMedia(body);
-    return this.renderBases(body);
+  // Open a sidebar section and scroll it into view, for plugins that want to
+  // point at something rather than open a pane.
+  revealSection(name) {
+    this.collapsed.delete('sec:' + name);
+    this.renderSidebar();
+    const head = [...this.el.sidebar.querySelectorAll('.side-head-label')]
+      .find((e) => e.textContent.toLowerCase() === name.toLowerCase());
+    if (head) head.scrollIntoView({ block: 'start', behavior: 'smooth' });
   }
 
-  renderFiles(body) {
+  toolbar() {
+    const btn = (label, title, run) => h('button', { class: 'tool-btn', title, onclick: run }, [
+      h('span', { text: label }),
+    ]);
+    return h('div', { class: 'side-toolbar' }, [
+      btn('New note', 'New note', () => this.command('note.new')),
+      btn('Folder', 'New folder', () => this.newFolder()),
+      btn('Today', "Today's daily note", () => this.command('note.daily')),
+      h('div', { class: 'spacer' }),
+      h('button', {
+        class: 'tool-btn tool-icon', text: '⇅', title: 'Sort and display',
+        onclick: (e) => this.menu(e.currentTarget, [
+          { label: 'Name A → Z', run: () => { this.fileSort = 'name'; this.renderSidebar(); } },
+          { label: 'Name Z → A', run: () => { this.fileSort = 'name-desc'; this.renderSidebar(); } },
+          { label: 'Recently edited', run: () => { this.fileSort = 'modified'; this.renderSidebar(); } },
+          { label: (this.settings.values.showAttachments ? '✓ ' : '   ') + 'Attachments in the tree',
+            run: () => {
+              this.settings.set({ showAttachments: !this.settings.values.showAttachments });
+              this.renderSidebar();
+            } },
+          { label: 'Collapse everything', run: () => this.collapseAll() },
+        ]),
+      }),
+    ]);
+  }
+
+  // One sidebar. Notes, views, tools, tags and files are sections of the same
+  // tree rather than five tabs you have to pick between before you can look.
+  renderSidebar() {
+    const body = this.el.sidebar;
+    const out = [];
+
+    const section = (key, label, rows, extra) => {
+      const open = !this.collapsed.has('sec:' + key);
+      out.push(h('div', {
+        class: 'side-head' + (open ? ' is-open' : ''),
+        onclick: () => {
+          if (open) this.collapsed.add('sec:' + key); else this.collapsed.delete('sec:' + key);
+          this.renderSidebar();
+        },
+      }, [
+        h('span', { class: 'twisty' + (open ? ' is-open' : ''), text: '▸' }),
+        h('span', { class: 'side-head-label', text: label }),
+        h('span', { class: 'count', text: rows.length }),
+      ]));
+      if (!open) return;
+      out.push(...rows);
+      if (extra) out.push(extra);
+    };
+
+    const leaf = (label, o = {}) => h('div', {
+      class: 'tree-row tree-file' + (o.active ? ' is-active' : ''),
+      style: `--depth:${o.depth ?? 1}`,
+      title: o.title || label,
+      draggable: o.draggable ? 'true' : null,
+      onclick: o.run,
+      oncontextmenu: o.menu ? (e) => { e.preventDefault(); this.menu(e.currentTarget, o.menu()); } : null,
+    }, [
+      h('span', { class: o.dot ? 'tree-dot' : 'tree-ico', text: o.dot ? '' : (o.icon || '▪') }),
+      h('span', { class: 'tree-name', text: label }),
+      o.count !== undefined ? h('span', { class: 'count', text: o.count }) : null,
+    ]);
+
+    // --- notes: the folder tree ---
     const tree = { dirs: new Map(), files: [] };
     for (const n of this.notes) {
-      const parts = n.path.split('/');
       let node = tree;
-      for (const dir of parts.slice(0, -1)) {
+      for (const dir of n.path.split('/').slice(0, -1)) {
         if (!node.dirs.has(dir)) node.dirs.set(dir, { dirs: new Map(), files: [] });
         node = node.dirs.get(dir);
       }
@@ -260,18 +315,15 @@ class App {
     const sortFiles = (a, b) => (sorter === 'modified' ? b.mtime - a.mtime
       : sorter === 'name-desc' ? b.title.localeCompare(a.title)
         : a.title.localeCompare(b.title));
-
-    // Count notes below a folder, so a collapsed folder still says how much is
-    // inside it.
     const total = (node) => node.files.length
       + [...node.dirs.values()].reduce((sum, d) => sum + total(d), 0);
 
-    const draw = (node, prefix, depth) => {
-      const out = [];
+    const walk = (node, prefix, depth) => {
+      const rows = [];
       for (const [name, child] of [...node.dirs].sort((a, b) => a[0].localeCompare(b[0]))) {
         const full = prefix ? prefix + '/' + name : name;
         const open = !this.collapsed.has(full);
-        const row = h('div', {
+        const dir = h('div', {
           class: 'tree-row tree-dir', style: `--depth:${depth}`,
           onclick: () => {
             if (open) this.collapsed.add(full); else this.collapsed.delete(full);
@@ -283,65 +335,94 @@ class App {
           h('span', { class: 'tree-name', text: name }),
           h('span', { class: 'count', text: total(child) }),
         ]);
-        this.dropTarget(row, full);
-        out.push(row);
-        if (open) out.push(...draw(child, full, depth + 1));
+        this.dropTarget(dir, full);
+        rows.push(dir);
+        if (open) rows.push(...walk(child, full, depth + 1));
       }
-      if (this.settings.values.showAttachments) {
-        for (const a of (node.assets || []).sort((x, y) => x.name.localeCompare(y.name))) {
-          out.push(h('div', {
-            class: 'tree-row tree-file tree-asset', style: `--depth:${depth}`,
-            title: a.path,
-            onclick: () => this.openAsset(a),
-            oncontextmenu: (e) => { e.preventDefault(); this.assetMenu(e.currentTarget, a); },
-          }, [
-            h('span', { class: 'asset-ico', text: KIND_ICON[a.kind] || '\u25cb' }),
-            h('span', { class: 'tree-name', text: a.name }),
-          ]));
-        }
+      for (const a of (node.assets || []).sort((x, y) => x.name.localeCompare(y.name))) {
+        rows.push(leaf(a.name, {
+          depth, icon: KIND_ICON[a.kind] || '○', title: a.path,
+          run: () => this.openAsset(a), menu: () => this.assetMenuItems(a),
+        }));
       }
       for (const f of node.files.sort(sortFiles)) {
-        const row = h('div', {
-          class: 'tree-row tree-file' + (this.current && this.current.path === f.path ? ' is-active' : ''),
-          style: `--depth:${depth}`,
-          draggable: 'true',
-          onclick: () => this.openNote(f.path),
-          oncontextmenu: (e) => { e.preventDefault(); this.noteMenu(e, f.path); },
-        }, [h('span', { class: 'tree-dot' }), h('span', { class: 'tree-name', text: f.title })]);
-        row.addEventListener('dragstart', (e) => {
-          e.dataTransfer.setData('text/new-era-note', f.path);
+        const el = leaf(f.title, {
+          depth, dot: true, title: f.path,
+          active: this.current && this.current.path === f.path,
+          draggable: true,
+          run: () => this.openNote(f.path),
+          menu: () => this.noteMenuItems(f.path),
+        });
+        el.addEventListener('dragstart', (e) => {
+          e.dataTransfer.setData('text/hermes-note', f.path);
           e.dataTransfer.effectAllowed = 'move';
         });
-        out.push(row);
+        rows.push(el);
       }
-      return out;
+      return rows;
     };
 
-    const root = h('div', { class: 'tree' }, draw(tree, '', 0));
-    this.dropTarget(root, ''); // dropping on empty space moves to the vault root
+    section('notes', 'Notes', walk(tree, '', 0));
 
-    body.replaceChildren(
-      h('div', { class: 'sidebar-actions' }, [
-        h('button', { class: 'btn-ghost', text: '+ Note', onclick: () => this.command('note.new') }),
-        h('button', { class: 'btn-ghost', text: '+ Folder', onclick: () => this.newFolder() }),
-        h('button', { class: 'btn-ghost', text: 'Today', onclick: () => this.command('note.daily') }),
-        h('button', {
-          class: 'btn-ghost sort-btn', text: '⇅', title: 'Sort and collapse',
-          onclick: (e) => this.menu(e.currentTarget, [
-            { label: 'Name A → Z', run: () => { this.fileSort = 'name'; this.renderSidebar(); } },
-            { label: 'Name Z → A', run: () => { this.fileSort = 'name-desc'; this.renderSidebar(); } },
-            { label: 'Recently edited', run: () => { this.fileSort = 'modified'; this.renderSidebar(); } },
-            { label: (this.settings.values.showAttachments ? '\u2713 ' : '   ') + 'Show attachments',
-              run: () => {
-                this.settings.set({ showAttachments: !this.settings.values.showAttachments });
-                this.renderSidebar();
-              } },
-            { label: 'Collapse all folders', run: () => this.collapseAll() },
-          ]),
-        }),
-      ]),
-      root,
-    );
+    // --- views: saved bases, then every folder as a table ---
+    section('views', 'Views', [
+      ...this.views.map((v) => leaf(v.name, {
+        icon: v.icon || '▦',
+        active: this.current && this.current.id === v.id,
+        run: () => this.openDatabase(v),
+        menu: () => [
+          { label: 'Open', run: () => this.openDatabase(v) },
+          { label: 'Delete base', run: () => {
+            this.views = this.views.filter((x) => x.id !== v.id);
+            this.saveViews();
+            this.renderSidebar();
+          } },
+        ],
+      })),
+      ...(this.folders || []).map((f) => leaf(f.folder, {
+        icon: '▦', count: f.n, title: `${f.folder} as a table`,
+        run: () => this.openDatabase(
+          { name: f.folder, source: { folder: f.folder }, view: 'table' }, true),
+      })),
+    ], h('div', {
+      class: 'tree-row tree-add', style: '--depth:1',
+      onclick: () => this.command('db.new'),
+    }, [h('span', { class: 'tree-name', text: '+ New base' })]));
+
+    // --- tools: the graph and anything a plugin registered ---
+    section('tools', 'Tools', [
+      leaf('Graph', {
+        icon: '◍',
+        active: this.current && this.current.type === 'graph',
+        run: () => this.openGraph('global'),
+      }),
+      ...[...this.plugins.views.entries()].map(([id, v]) => leaf(v.name, {
+        icon: '▤', title: `${v.name} (${v.plugin})`,
+        active: this.current && this.current.id === id,
+        run: () => this.openPluginView(id),
+      })),
+      ...this.plugins.ribbon
+        .filter((r) => ![...this.plugins.views.values()].some((v) => v.plugin === r.plugin))
+        .map((r) => leaf(r.title || r.plugin, { icon: r.icon || '▪', run: (e) => r.run(e) })),
+    ]);
+
+    // --- tags ---
+    section('tags', 'Tags', (this.tags || []).map((t) => leaf('#' + t.tag, {
+      icon: '#', count: t.n,
+      run: () => this.openDatabase({ name: '#' + t.tag, source: { tag: t.tag }, view: 'table' }, true),
+    })));
+
+    // --- files ---
+    section('files', 'Files', (this.assets || []).map((a) => leaf(a.name, {
+      icon: KIND_ICON[a.kind] || '○',
+      title: `${a.path} · ${fileSize(a.size)}`,
+      run: () => this.openAsset(a),
+      menu: () => this.assetMenuItems(a),
+    })));
+
+    const root = h('div', { class: 'tree' }, out);
+    this.dropTarget(root, '');
+    body.replaceChildren(root);
   }
 
   // Dragging a note onto a folder row moves the file on disk. Links resolve by
@@ -417,58 +498,6 @@ class App {
     ]);
   }
 
-  // Every non-markdown file in the vault: images, data, video, PDFs.
-  async renderMedia(body) {
-    const kinds = await newEra.asset.kinds();
-    const filter = this.mediaKind || null;
-    const list = h('div', { class: 'tree' });
-
-    const draw = async () => {
-      const rows = await newEra.asset.list({ kind: filter, search: this.mediaSearch || null });
-      if (!rows.length) {
-        list.replaceChildren(h('div', { class: 'muted', text: 'Nothing here yet - paste or drop a file into a note.' }));
-        return;
-      }
-      list.replaceChildren(...rows.map((a) => h('div', {
-        class: 'tree-row tree-file asset-row', style: '--depth:0', title: a.path,
-        onclick: () => this.openAsset(a),
-        oncontextmenu: (e) => { e.preventDefault(); this.assetMenu(e.currentTarget, a); },
-      }, [
-        h('span', { class: 'asset-ico', text: KIND_ICON[a.kind] || '\u25cb' }),
-        h('div', { class: 'asset-body' }, [
-          h('div', { class: 'asset-name', text: a.name }),
-          h('div', { class: 'asset-sub', text: `${a.folder || 'vault root'} \u00b7 ${fileSize(a.size)}` }),
-        ]),
-      ])));
-    };
-
-    body.replaceChildren(
-      h('div', { class: 'sidebar-actions' }, [
-        h('input', {
-          class: 'search-input', placeholder: 'Find a file\u2026', value: this.mediaSearch || '',
-          oninput: (e) => {
-            this.mediaSearch = e.target.value;
-            clearTimeout(this._mt);
-            this._mt = setTimeout(draw, 180);
-          },
-        }),
-      ]),
-      h('div', { class: 'kind-chips' }, [
-        h('button', {
-          class: 'kind-chip' + (filter ? '' : ' is-active'), text: 'all',
-          onclick: () => { this.mediaKind = null; this.renderSidebar(); },
-        }),
-        ...kinds.map((k) => h('button', {
-          class: 'kind-chip' + (filter === k.kind ? ' is-active' : ''),
-          text: `${KIND_ICON[k.kind] || ''} ${k.kind} ${k.n}`,
-          onclick: () => { this.mediaKind = k.kind; this.renderSidebar(); },
-        })),
-      ]),
-      list,
-    );
-    await draw();
-  }
-
   // Data files open in the viewer; everything else goes to the OS.
   openAsset(a) {
     if (['json', 'csv', 'tsv', 'xlsx'].includes(a.ext) && this.plugins.views.has('data-viewer:file')) {
@@ -479,9 +508,13 @@ class App {
   }
 
   assetMenu(anchor, a) {
+    this.menu(anchor, this.assetMenuItems(a));
+  }
+
+  assetMenuItems(a) {
     const link = /^(png|jpe?g|gif|webp|svg|avif|bmp|mp4|mov|webm|mp3|wav|ogg|m4a)$/i.test(a.ext)
       ? `![[${a.name}]]` : `[${a.name}](${encodeURI(a.path)})`;
-    this.menu(anchor, [
+    return [
       { label: 'Open', run: () => this.openAsset(a) },
       { label: 'Open with system app', run: () => newEra.asset.open(a.path) },
       { label: 'Copy embed for a note', run: async () => {
@@ -499,135 +532,14 @@ class App {
         await this.refresh();
         this.toast('Moved ' + a.name + ' to trash');
       } },
-    ]);
-  }
-
-  renderSearch(body) {
-    const results = h('div', { class: 'results' });
-    const input = h('input', {
-      class: 'search-input', placeholder: 'Search all notes…', value: this.lastSearch || '',
-      oninput: async (e) => {
-        this.lastSearch = e.target.value;
-        const rows = await newEra.index.search(e.target.value);
-        results.replaceChildren(...rows.map((r) => {
-          const snip = h('div', { class: 'result-snip' });
-          snip.innerHTML = sanitize(r.snip || '');
-          return h('div', { class: 'result', onclick: () => this.openNote(r.path) }, [
-            h('div', { class: 'result-title', text: r.title }), snip,
-          ]);
-        }));
-        if (!rows.length && e.target.value) results.replaceChildren(h('div', { class: 'muted', text: 'No matches' }));
-      },
-    });
-    body.replaceChildren(h('div', { class: 'sidebar-actions' }, [input]), results);
-    input.focus();
-  }
-
-  async renderTags(body) {
-    const tags = await newEra.index.tags();
-    body.replaceChildren(h('div', { class: 'tree' }, tags.map((t) => h('div', {
-      class: 'tree-row tree-file', style: '--depth:0',
-      onclick: () => this.openDatabase({ name: '#' + t.tag, source: { tag: t.tag }, view: 'table' }, true),
-    }, [h('span', { text: '#' + t.tag }), h('span', { class: 'count', text: t.n })]))));
-  }
-
-  // Everything you can open that is not a note, laid out like the file tree
-  // rather than as a row of unlabelled buttons.
-  async renderBases(body) {
-    const folders = await newEra.index.folders();
-
-    const group = (key, label, rows, action) => {
-      if (!rows.length && !action) return [];
-      const open = !this.collapsed.has('group:' + key);
-      const head = h('div', {
-        class: 'tree-row tree-dir', style: '--depth:0',
-        onclick: () => {
-          if (open) this.collapsed.add('group:' + key); else this.collapsed.delete('group:' + key);
-          this.renderSidebar();
-        },
-      }, [
-        h('span', { class: 'twisty' + (open ? ' is-open' : ''), text: '▸' }),
-        h('span', { class: 'tree-name', text: label }),
-        h('span', { class: 'count', text: rows.length }),
-      ]);
-      if (!open) return [head];
-      const body2 = rows.map((r) => r());
-      if (action) {
-        body2.push(h('div', {
-          class: 'tree-row tree-add', style: '--depth:1', onclick: action.run,
-        }, [h('span', { class: 'tree-name', text: action.label })]));
-      }
-      return [head, ...body2];
-    };
-
-    const row = (label, opts = {}) => () => h('div', {
-      class: 'tree-row tree-file' + (opts.active ? ' is-active' : ''),
-      style: '--depth:1',
-      title: opts.title || label,
-      onclick: opts.run,
-      oncontextmenu: opts.menu
-        ? (e) => { e.preventDefault(); this.menu(e.currentTarget, opts.menu()); }
-        : null,
-    }, [
-      h('span', { class: 'tree-ico', text: opts.icon || '▪' }),
-      h('span', { class: 'tree-name', text: label }),
-      opts.count !== undefined ? h('span', { class: 'count', text: opts.count }) : null,
-    ]);
-
-    const bases = this.views.map((v) => row(v.name, {
-      icon: v.icon || '▦',
-      active: this.current && this.current.id === v.id,
-      run: () => this.openDatabase(v),
-      menu: () => [
-        { label: 'Open', run: () => this.openDatabase(v) },
-        { label: 'Delete base', run: () => {
-          this.views = this.views.filter((x) => x.id !== v.id);
-          this.saveViews();
-          this.renderSidebar();
-        } },
-      ],
-    }));
-
-    const folderRows = folders.map((f) => row(f.folder, {
-      icon: '▦', count: f.n,
-      run: () => this.openDatabase(
-        { name: f.folder, source: { folder: f.folder }, view: 'table' }, true),
-    }));
-
-    // Plugin views and ribbon actions live here now instead of a button strip.
-    const tools = [
-      row('Graph', {
-        icon: '◍',
-        active: this.current && this.current.type === 'graph',
-        run: () => this.openGraph('global'),
-      }),
-      ...[...this.plugins.views.entries()].map(([id, v]) => row(v.name.replace(/\s*\(.*\)$/, ''), {
-        icon: '▤',
-        title: v.name,
-        active: this.current && this.current.id === id,
-        run: () => this.openPluginView(id),
-      })),
-      ...this.plugins.ribbon
-        .filter((r) => !/^(Kanban|Tasks|Data files)/i.test(r.title || ''))
-        .map((r) => row(r.title || r.plugin, {
-          icon: r.icon || '▪',
-          run: (e) => r.run(e),
-        })),
     ];
-
-    body.replaceChildren(h('div', { class: 'tree' }, [
-      ...group('bases', 'Bases', bases,
-        { label: '+ New base', run: () => this.command('db.new') }),
-      ...group('folders', 'Folders as tables', folderRows),
-      ...group('tools', 'Tools', tools),
-    ]));
   }
 
   // Plugin buttons are listed in the Tools group of the sidebar now, so there
   // is no separate ribbon to paint. Kept as a hook because the plugin host
   // calls it after enabling or disabling a plugin.
   renderRibbon() {
-    if (this.sidebarTab === 'bases') this.renderSidebar();
+    this.renderSidebar();
   }
 
   // --- tabs ----------------------------------------------------------------
@@ -757,7 +669,11 @@ class App {
   }
 
   noteMenu(e, path) {
-    this.menu(e.target, [
+    this.menu(e.target, this.noteMenuItems(path));
+  }
+
+  noteMenuItems(path) {
+    return [
       { label: 'Open', run: () => this.openNote(path) },
       { label: 'Rename…', run: async () => {
         const name = await this.prompt('New name', path.split('/').pop().replace(/\.md$/, ''));
@@ -770,7 +686,7 @@ class App {
         await this.refresh();
         this.renderWelcome();
       } },
-    ]);
+    ];
   }
 
   // --- right rail: properties + backlinks ----------------------------------
@@ -941,7 +857,7 @@ class App {
         await this.refresh();
         this.toast(`Indexed ${s.total} notes, ${s.links} links`);
       } },
-      { id: 'view.search', name: 'Search notes', run: () => { this.sidebarTab = 'search'; this.renderSidebar(); } },
+      { id: 'view.search', name: 'Search notes and their text', run: () => this.omni.open() },
       { id: 'palette.omni', name: 'Search everything', run: () => this.omni.open() },
       { id: 'palette.files', name: 'Find a note', run: () => this.omni.open() },
       { id: 'palette.commands', name: 'Run a command', run: () => this.omni.open('>') },

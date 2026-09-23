@@ -5,7 +5,7 @@
 const { DatabaseSync } = require('node:sqlite');
 const fs = require('node:fs');
 const path = require('node:path');
-const { parseFrontmatter, parseLinks, titleOf } = require('./parse.js');
+const { parseFrontmatter, parseLinks, frontmatterTags, titleOf } = require('./parse.js');
 
 const SCHEMA = `
 CREATE TABLE IF NOT EXISTS notes (
@@ -26,7 +26,13 @@ CREATE TABLE IF NOT EXISTS assets (
   path TEXT PRIMARY KEY, name TEXT, ext TEXT, folder TEXT, size INTEGER, mtime INTEGER
 );
 CREATE INDEX IF NOT EXISTS assets_name ON assets(name);
+CREATE TABLE IF NOT EXISTS meta (key TEXT PRIMARY KEY, value TEXT);
 `;
+
+// Bump when the way a note is parsed changes - titles, links, frontmatter.
+// sync() only re-reads files whose mtime moved, so without this a parsing fix
+// never reaches notes you have not touched since.
+const PARSER_VERSION = '3';
 
 const KIND = {
   image: ['png', 'jpg', 'jpeg', 'gif', 'webp', 'svg', 'avif', 'bmp', 'ico'],
@@ -61,6 +67,15 @@ class Index {
     this.db = new DatabaseSync(path.join(dir, 'index.db'));
     this.db.exec('PRAGMA journal_mode = WAL');
     this.db.exec(SCHEMA);
+
+    const seen = this.db.prepare("SELECT value FROM meta WHERE key = 'parser'").get();
+    if (!seen || seen.value !== PARSER_VERSION) {
+      // Drop the derived rows and let the next sync rebuild them. The files
+      // themselves are the source of truth, so nothing is lost.
+      for (const t of ['notes', 'fts', 'links']) this.db.exec('DELETE FROM ' + t);
+      this.db.prepare("INSERT INTO meta (key, value) VALUES ('parser', ?) "
+        + 'ON CONFLICT(key) DO UPDATE SET value = excluded.value').run(PARSER_VERSION);
+    }
   }
 
   close() { try { this.db.close(); } catch { /* already closed */ } }
@@ -185,7 +200,13 @@ class Index {
     this.db.prepare('DELETE FROM links WHERE src = ?').run(rel);
     const ins = this.db.prepare(
       'INSERT INTO links (src,target,resolved,type,alias) VALUES (?,?,?,?,?)');
-    for (const l of parseLinks(body)) {
+    const links = parseLinks(body);
+    for (const name of frontmatterTags(data)) {
+      if (!links.some((l) => l.type === 'tag' && l.target === name)) {
+        links.push({ target: name, type: 'tag', alias: null });
+      }
+    }
+    for (const l of links) {
       // Tags live in this table too, but they name a topic, not a file - they
       // never resolve to a path and must not count as broken links.
       const res = l.type === 'tag' ? null : this.resolve(l.target);

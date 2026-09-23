@@ -1036,13 +1036,9 @@ class App {
   // An anchored panel with arbitrary content (emoji picker, cover picker).
   popover(anchor, children) {
     this.closeOverlay();
-    const r = anchor.getBoundingClientRect();
     const pop = h('div', { class: 'popover' }, children);
     document.body.append(pop);
-    const box = pop.getBoundingClientRect();
-    pop.style.left = Math.max(8, Math.min(r.left, window.innerWidth - box.width - 8)) + 'px';
-    pop.style.top = (r.bottom + box.height + 8 > window.innerHeight
-      ? Math.max(8, r.top - box.height - 6) : r.bottom + 6) + 'px';
+    this.place(pop, anchor);
     const away = (e) => {
       if (pop.contains(e.target) || anchor.contains(e.target)) return;
       document.removeEventListener('mousedown', away, true);
@@ -1102,11 +1098,34 @@ class App {
 
   menu(anchor, items) {
     this.closeOverlay();
-    const r = anchor.getBoundingClientRect();
-    const menu = h('div', { class: 'menu', style: `left:${Math.min(r.left, innerWidth - 240)}px; top:${r.bottom + 4}px` },
-      items.map((i) => h('div', { class: 'menu-row', text: i.label, onclick: () => { this.closeOverlay(); i.run(); } })));
+    const menu = h('div', { class: 'menu' }, items.map((i) => h('div', {
+      class: 'menu-row', text: i.label, onclick: () => { this.closeOverlay(); i.run(); },
+    })));
     document.body.append(menu);
+    this.place(menu, anchor);
     setTimeout(() => document.addEventListener('click', () => this.closeOverlay(), { once: true }), 0);
+    return menu;
+  }
+
+  // Anchor a floating panel, flipping it above when there is no room below.
+  // Anything triggered from the sidebar footer opens upward, which is why the
+  // vault menu used to render off the bottom of the window.
+  place(el, anchor) {
+    const a = anchor.getBoundingClientRect();
+    const box = el.getBoundingClientRect();
+    const pad = 8;
+    const below = a.bottom + 4;
+    const fitsBelow = below + box.height <= window.innerHeight - pad;
+    const top = fitsBelow ? below : Math.max(pad, a.top - box.height - 4);
+    el.style.left = Math.max(pad, Math.min(a.left, window.innerWidth - box.width - pad)) + 'px';
+    el.style.top = top + 'px';
+    // Still too tall for the window even flipped: let it scroll rather than
+    // spill past the edge.
+    if (box.height > window.innerHeight - pad * 2) {
+      el.style.top = pad + 'px';
+      el.style.maxHeight = (window.innerHeight - pad * 2) + 'px';
+      el.style.overflowY = 'auto';
+    }
   }
 
   prompt(label, value = '') {

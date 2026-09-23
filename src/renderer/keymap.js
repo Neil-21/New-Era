@@ -1,8 +1,11 @@
 // Keybindings. One place that owns "which keystroke runs which command", so the
 // settings panel can rebind anything without hunting through handlers.
-const MAC = navigator.platform.toLowerCase().includes('mac');
+// Guarded so the module can be imported outside a browser (the tests do).
+const MAC = typeof navigator !== 'undefined'
+  && /mac/i.test(navigator.platform || navigator.userAgent || '');
 
 export const DEFAULT_KEYS = {
+  'palette.omni': 'Mod+K',
   'palette.files': 'Mod+O',
   'palette.commands': 'Mod+P',
   'note.new': 'Mod+N',

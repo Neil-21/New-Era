@@ -7,6 +7,8 @@ import { renderPageHeader } from './page.js';
 import { Settings } from './settings.js';
 import { GraphView } from './graph.js';
 import { Keymap } from './keymap.js';
+import { Omni } from './omni.js';
+import { label as keyLabel } from './keymap.js';
 
 const newEra = window.newEra;
 
@@ -35,6 +37,7 @@ class App {
     this.plugins = new PluginHost(this);
     this.settings = new Settings(this);
     this.keymap = new Keymap(this);
+    this.omni = new Omni(this);
   }
 
   async boot() {
@@ -47,6 +50,7 @@ class App {
     newEra.on('command', (cmd) => this.command(cmd));
     window.addEventListener('keydown', (e) => this.hotkey(e));
     this.keymap.load(this.settings.values.keys);
+    this.setCrumb('Search notes, files, settings\u2026');
     await this.plugins.loadAll(this.settings.values.disabledPlugins || []);
     this.renderRibbon();
   }
@@ -74,7 +78,15 @@ class App {
     }));
     this.el.stabs = tabs;
 
-    this.el.crumb = h('div', { class: 'titlebar-crumb' });
+    this.el.crumbText = h('span', { class: 'crumb-text', text: 'Search notes, files, settings\u2026' });
+    this.el.crumb = h('button', {
+      class: 'titlebar-crumb no-drag', title: 'Search everything',
+      onclick: () => this.omni.open(),
+    }, [
+      h('span', { class: 'crumb-ico', text: '\u2315' }),
+      this.el.crumbText,
+      h('span', { class: 'crumb-key' }),
+    ]);
     document.documentElement.dataset.platform = newEra.platform || 'win32';
 
     return h('div', { class: 'app' }, [
@@ -170,7 +182,13 @@ class App {
         this.assetByName.set(a.name.toLowerCase(), a.path);
       }
     }
+    this.tags = null;
     this.renderSidebar();
+  }
+
+  async tagList() {
+    if (!this.tags) this.tags = await newEra.index.tags();
+    return this.tags;
   }
 
   // Where a pasted or dropped file should land, per the attachment setting.
@@ -884,7 +902,9 @@ class App {
   }
 
   setCrumb(text) {
-    if (this.el.crumb) this.el.crumb.textContent = text;
+    if (this.el.crumbText) this.el.crumbText.textContent = text;
+    const hint = this.el.crumb && this.el.crumb.querySelector('.crumb-key');
+    if (hint) hint.textContent = keyLabel(this.keymap.keys['palette.omni'] || '');
   }
 
   openTab(t) {
@@ -922,8 +942,11 @@ class App {
         this.toast(`Indexed ${s.total} notes, ${s.links} links`);
       } },
       { id: 'view.search', name: 'Search notes', run: () => { this.sidebarTab = 'search'; this.renderSidebar(); } },
-      { id: 'palette.files', name: 'Quick switcher', run: () => this.palette('files') },
-      { id: 'palette.commands', name: 'Command palette', run: () => this.palette('commands') },
+      { id: 'palette.omni', name: 'Search everything', run: () => this.omni.open() },
+      { id: 'palette.files', name: 'Find a note', run: () => this.omni.open() },
+      { id: 'palette.commands', name: 'Run a command', run: () => this.omni.open('>') },
+      { id: 'palette.files2', name: 'Find a file or attachment', run: () => this.omni.open('@') },
+      { id: 'palette.settings', name: 'Find a setting', run: () => this.omni.open('/') },
       { id: 'view.graph', name: 'Graph view', run: () => this.openGraph('global') },
       { id: 'view.rail', name: 'Toggle right panel', run: () => this.toggleRail() },
       { id: 'editor.highlight', name: 'Highlight selection', run: () => this.wrapSelection('==') },
@@ -1048,11 +1071,12 @@ class App {
     return pop;
   }
 
-  openSettings() {
+  openSettings(tab, highlight) {
     this.closeOverlay();
+    if (tab) this.settings.tab = tab;
     const overlay = h('div', {
       class: 'overlay', onclick: (e) => { if (e.target === overlay) this.closeOverlay(); },
-    }, [h('div', { class: 'panel' }, [this.settings.panel()])]);
+    }, [h('div', { class: 'panel' }, [this.settings.panel(highlight)])]);
     document.body.append(overlay);
   }
 
@@ -1060,40 +1084,10 @@ class App {
     document.body.classList.toggle('no-sidebar');
   }
 
+  // Kept for callers and muscle memory: both old palettes are scopes of the
+  // one search now.
   palette(mode) {
-    this.closeOverlay();
-    const items = mode === 'files'
-      ? this.notes.map((n) => ({ label: n.title, hint: n.path, run: () => this.openNote(n.path) }))
-      : [...this.builtins(), ...this.plugins.allCommands()].map((c) => ({ label: c.name, hint: c.id, run: c.run }));
-
-    const list = h('div', { class: 'palette-list' });
-    let shown = [];
-    let sel = 0;
-    const draw = (q) => {
-      const ql = q.toLowerCase();
-      shown = items.filter((i) => (i.label + ' ' + i.hint).toLowerCase().includes(ql)).slice(0, 60);
-      sel = 0;
-      paint();
-    };
-    const paint = () => list.replaceChildren(...shown.map((i, n) => h('div', {
-      class: 'palette-row' + (n === sel ? ' is-sel' : ''),
-      onclick: () => { this.closeOverlay(); i.run(); },
-    }, [h('span', { text: i.label }), h('span', { class: 'hint', text: i.hint })])));
-
-    const input = h('input', {
-      class: 'palette-input', placeholder: mode === 'files' ? 'Jump to note…' : 'Run a command…',
-      oninput: (e) => draw(e.target.value),
-      onkeydown: (e) => {
-        if (e.key === 'ArrowDown') { sel = Math.min(sel + 1, shown.length - 1); paint(); e.preventDefault(); }
-        if (e.key === 'ArrowUp') { sel = Math.max(sel - 1, 0); paint(); e.preventDefault(); }
-        if (e.key === 'Enter' && shown[sel]) { this.closeOverlay(); shown[sel].run(); }
-      },
-    });
-    const overlay = h('div', { class: 'overlay', onclick: (e) => { if (e.target === overlay) this.closeOverlay(); } },
-      [h('div', { class: 'palette' }, [input, list])]);
-    document.body.append(overlay);
-    draw('');
-    input.focus();
+    this.omni.open(mode === 'commands' ? '>' : '');
   }
 
   menu(anchor, items) {

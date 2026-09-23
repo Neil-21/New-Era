@@ -34,6 +34,28 @@ const FONTS = {
 const ACCENTS = ['#7c9cff', '#8b7cf6', '#ec6a9c', '#f08c4b', '#3fb984', '#48b0d0', '#c9a227', '#d1495b'];
 const HIGHLIGHTS = ['#e0c04e', '#7ad17a', '#69b7e8', '#e08ab8', '#c79bf0', '#e0885a'];
 
+// What the omni-search and the settings filter look through. Keywords are the
+// words people actually type when they cannot remember our label.
+const INDEX = [
+  ['theme', 'Theme', 'appearance', 'dark, midnight or light', 'dark light mode colour scheme night'],
+  ['accent', 'Accent', 'appearance', 'the app highlight colour', 'colour color blue primary accent'],
+  ['highlight', 'Highlight', 'appearance', 'colour for ==highlighted text==', 'marker pen yellow colour color'],
+  ['fontText', 'Font', 'appearance', 'typeface for notes', 'typeface serif mono inter font'],
+  ['editorSize', 'Text size', 'appearance', 'how big note text is', 'font size bigger smaller zoom'],
+  ['editorLeading', 'Line height', 'appearance', 'spacing between lines', 'leading spacing airy dense'],
+  ['noteWidth', 'Line width', 'appearance', 'how wide a note reads', 'measure column width narrow wide'],
+  ['coverHeight', 'Cover height', 'appearance', 'height of the page banner', 'banner cover image header'],
+  ['sidebarWidth', 'Sidebar width', 'appearance', 'how wide the sidebar is', 'panel left narrow wide'],
+  ['newNoteFolder', 'New note folder', 'editor', 'where new notes are created', 'default location new note'],
+  ['dailyFolder', 'Daily notes folder', 'editor', 'where the daily note lives', 'journal today date daily'],
+  ['attachmentMode', 'Attachments go to', 'editor', 'folder for pasted and dropped files', 'image paste drop upload photo attachment file'],
+  ['attachmentFolder', 'Attachment folder name', 'editor', 'name of the attachments folder', 'image paste upload attachment folder name'],
+  ['keys', 'Keyboard shortcuts', 'keys', 'rebind any command', 'keybinding hotkey shortcut key rebind'],
+  ['plugins', 'Plugins', 'plugins', 'turn plugins on and off', 'extension addon kanban tasks export plugin'],
+];
+
+const KEY_BY_LABEL = new Map(INDEX.map(([key, label]) => [label, key]));
+
 // titleBarOverlay only accepts opaque hex, so trim anything else away.
 function hex(value) {
   const m = String(value).trim().match(/^#([0-9a-f]{6})$/i);
@@ -86,9 +108,15 @@ export class Settings {
     });
   }
 
+  index() {
+    return INDEX.map(([key, label, tab, hint, keywords]) => ({
+      key, label, tab, hint, keywords: keywords.split(' '),
+    }));
+  }
+
   // --- panel ---------------------------------------------------------------
 
-  panel() {
+  panel(highlight) {
     const body = h('div', { class: 'set-body' });
     const tabs = [
       ['appearance', 'Appearance'],
@@ -96,18 +124,43 @@ export class Settings {
       ['keys', 'Keybindings'],
       ['plugins', 'Plugins'],
     ];
+    const search = h('input', {
+      class: 'palette-input set-search', placeholder: 'Search every setting\u2026',
+      oninput: () => paint(),
+    });
+
     const paint = () => {
-      body.replaceChildren(
-        this.tab === 'editor' ? this.editorTab()
-          : this.tab === 'keys' ? this.keysTab()
-            : this.tab === 'plugins' ? this.pluginsTab()
-              : this.appearanceTab(),
-      );
+      const q = search.value.trim().toLowerCase();
+      if (q) {
+        // Searching crosses tabs: you should not have to guess which one holds
+        // the thing you are after.
+        const hits = this.index().filter((i) => (i.label + ' ' + i.hint + ' ' + i.keywords.join(' '))
+          .toLowerCase().includes(q));
+        const keep = new Set(hits.map((i) => i.key));
+        body.replaceChildren(...[...new Set(hits.map((i) => i.tab))].map((t) => this.section(t)));
+        for (const row of body.querySelectorAll('.set-row')) {
+          if (!keep.has(row.dataset.setkey)) row.remove();
+        }
+        if (!body.querySelector('.set-row')) {
+          body.replaceChildren(h('div', { class: 'muted', text: 'No setting matches that.' }));
+        }
+        for (const b of nav.children) b.classList.remove('is-active');
+        return;
+      }
+      body.replaceChildren(this.section(this.tab));
       for (const b of nav.children) b.classList.toggle('is-active', b.dataset.tab === this.tab);
+      if (highlight) {
+        const row = body.querySelector('.set-row[data-setkey="' + highlight + '"]');
+        if (row) {
+          row.classList.add('is-found');
+          row.scrollIntoView({ block: 'center' });
+        }
+        highlight = null;
+      }
     };
     const nav = h('div', { class: 'set-nav' }, tabs.map(([id, name]) => h('button', {
       class: 'set-navbtn' + (this.tab === id ? ' is-active' : ''), text: name, 'data-tab': id,
-      onclick: () => { this.tab = id; paint(); },
+      onclick: () => { this.tab = id; search.value = ''; paint(); },
     })));
 
     paint();
@@ -119,13 +172,21 @@ export class Settings {
           onclick: () => { this.reset(); this.app.keymap.reset(); this.app.openSettings(); },
         }),
       ]),
+      search,
       nav,
       body,
     ]);
   }
 
+  section(tab) {
+    if (tab === 'editor') return this.editorTab();
+    if (tab === 'keys') return this.keysTab();
+    if (tab === 'plugins') return this.pluginsTab();
+    return this.appearanceTab();
+  }
+
   row(label, control, note) {
-    return h('div', { class: 'set-row' }, [
+    return h('div', { class: 'set-row', 'data-setkey': KEY_BY_LABEL.get(label) || null }, [
       h('div', {}, [
         h('div', { class: 'set-label', text: label }),
         note ? h('div', { class: 'set-note', text: note }) : null,
@@ -255,7 +316,13 @@ export class Settings {
       ]);
     });
     return h('div', {}, [
-      h('div', { class: 'set-foot', text: 'Click a shortcut, then press the keys you want. Escape cancels.' }),
+      h('div', { class: 'set-row', 'data-setkey': 'keys' }, [
+        h('div', {}, [
+          h('div', { class: 'set-label', text: 'Keyboard shortcuts' }),
+          h('div', { class: 'set-note', text: 'Click a shortcut, then press the keys you want. Escape cancels.' }),
+        ]),
+        h('span', { class: 'set-out', text: all.length }),
+      ]),
       ...rows,
       h('div', { class: 'set-row' }, [
         h('div', { class: 'set-label', text: 'Restore default shortcuts' }),
@@ -299,6 +366,13 @@ export class Settings {
       ]);
     });
     return h('div', {}, [
+      h('div', { class: 'set-row', 'data-setkey': 'plugins' }, [
+        h('div', {}, [
+          h('div', { class: 'set-label', text: 'Plugins' }),
+          h('div', { class: 'set-note', text: 'Turn any of them on or off' }),
+        ]),
+        h('span', { class: 'set-out', text: host.available.length }),
+      ]),
       ...(rows.length ? rows : [h('div', { class: 'muted', text: 'No plugins found.' })]),
       h('div', { class: 'set-row' }, [
         h('div', {}, [

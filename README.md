@@ -6,6 +6,8 @@ Obsidian's editing model and Notion's databases in one app, over the same files.
 - **Your databases are queries** over those files. A property is a frontmatter key. Editing a table cell or dragging a board card rewrites the `.md` file.
 - **SQLite is an index, not the truth.** Delete `.new-era/index.db` and it rebuilds from the files.
 - **Pages look like Notion pages.** Cover banners, page icons, callouts, web embeds, a `/` block menu.
+- **One search finds everything** — notes, files, tags, bases, tools, commands and
+  individual settings, from one key.
 - **A graph of the whole vault**, or just the note you are on.
 - **Files live in the vault.** Paste or drop an image, video, PDF or spreadsheet and it is
   saved next to the note, indexed, and findable.
@@ -24,8 +26,9 @@ Every shortcut below is rebindable in **Settings → Keybindings**.
 
 | | |
 |---|---|
-| `Ctrl+O` | quick switcher |
-| `Ctrl+P` | command palette |
+| `Ctrl+K` | search everything (or click the bar in the title bar) |
+| `Ctrl+O` | same, starting on notes |
+| `Ctrl+P` | same, scoped to commands |
 | `Ctrl+N` | new note |
 | `Ctrl+Shift+N` | new database base |
 | `Ctrl+Shift+F` | search |
@@ -49,6 +52,7 @@ main process                    renderer
                                  cover.js     gradients, cover resolution
                                  settings.js  appearance, editor, keys, plugins
                                  keymap.js    rebindable shortcuts
+                                 omni.js      one search over everything
   sheet.js   xlsx / csv reader
                                  plugins.js   plugin host
 ```
@@ -141,6 +145,35 @@ cards.
 Loom and Google Docs become live iframes; everything else becomes a link card,
 because most sites refuse to be framed. `!(url)` forces an iframe anyway.
 
+## Finding things
+
+`Ctrl+K`, or the search bar in the middle of the title bar, searches
+everything at once and groups what it finds:
+
+```
+Notes        the note titles and their folders
+Files        attachments, by name and extension
+Tags         every #tag, opening as a table
+Bases        your saved database views
+Tools        the graph and any plugin view
+Settings     individual settings, by name or by what you'd call them
+Commands     every command, with its current shortcut shown
+```
+
+A prefix narrows it, and `Tab` cycles through them:
+
+| | |
+|---|---|
+| `>` | commands |
+| `#` | tags |
+| `@` | files and attachments |
+| `/` | settings |
+
+Searching `paste` finds the attachment settings, because settings are indexed
+by the words people actually use, not only by their label. Picking a setting
+opens the panel on the right tab with that row highlighted. If nothing matches,
+the last row offers to create a note with what you typed.
+
 ## Files and attachments
 
 Paste or drop anything into a note and it is written into the vault, never
@@ -188,6 +221,10 @@ The sort button offers A→Z, Z→A and recently edited.
   frees it from whatever held it before, so you cannot end up with two commands
   on one chord.
 - **Plugins** — enable or disable, with what each one registers.
+
+The search box at the top of the panel looks across all four tabs at once, so
+`image` turns up the cover height and both attachment settings without you
+having to guess which tab holds them.
 
 All of it in `<vault>/.new-era/settings.json`.
 
@@ -267,7 +304,8 @@ npm test
 ```
 
 Covers frontmatter round-tripping, link parsing, indexing, query filters, SQL
-injection through filter values, the kanban card mover, template tokens, the
+injection through filter values, search ranking, vault migration, the kanban
+card mover, template tokens, the
 markdown-to-HTML renderer (including escaping), and the xlsx reader — which is
 tested against a zip this suite builds byte by byte, stored and deflated
 members included.
@@ -288,7 +326,7 @@ The plan was to build on `logseq/logseq`. Two reasons it isn't:
    data model, the editor and the renderer, which is most of the app.
 2. It is ~500k lines of ClojureScript with its own build toolchain.
 
-What you see above is ~5,100 lines of JavaScript. Runtime dependencies:
+What you see above is ~5,600 lines of JavaScript. Runtime dependencies:
 CodeMirror. Build dependencies: Electron and esbuild. That is the whole list.
 The clone under `logseq/` is reference material only - nothing imports from it.
 Logseq's good ideas are here anyway: a queryable index over plain files, and

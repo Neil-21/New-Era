@@ -32,7 +32,9 @@ class App {
     this.tabs = [];
     this.current = null;
     this.editor = null;
-    this.collapsed = new Set();
+    // Everything except Notes starts closed. The sidebar should open on the
+    // thing you came for, not on all five things at once.
+    this.collapsed = new Set(['sec:views', 'sec:tools', 'sec:tags', 'sec:files']);
     this.plugins = new PluginHost(this);
     this.settings = new Settings(this);
     this.keymap = new Keymap(this);
@@ -130,6 +132,9 @@ class App {
     this.el.vaultName.title = state.vault;
     this.views = await newEra.views.list();
     await this.settings.load();
+    if (Array.isArray(this.settings.values.collapsed)) {
+      this.collapsed = new Set(this.settings.values.collapsed);
+    }
     this.keymap.load(this.settings.values.keys);
     await this.refresh();
     if (!this.current) {
@@ -217,10 +222,16 @@ class App {
 
   // --- sidebar -------------------------------------------------------------
 
+  toggleSection(key) {
+    if (this.collapsed.has(key)) this.collapsed.delete(key); else this.collapsed.add(key);
+    this.settings.set({ collapsed: [...this.collapsed] });
+    this.renderSidebar();
+  }
+
   // Open a sidebar section and scroll it into view, for plugins that want to
   // point at something rather than open a pane.
   revealSection(name) {
-    this.collapsed.delete('sec:' + name);
+    this.collapsed.delete('sec:' + name.toLowerCase());
     this.renderSidebar();
     const head = [...this.el.sidebar.querySelectorAll('.side-head-label')]
       .find((e) => e.textContent.toLowerCase() === name.toLowerCase());
@@ -260,13 +271,12 @@ class App {
     const out = [];
 
     const section = (key, label, rows, extra) => {
+      // An empty section is a row that only ever says zero. Leave it out.
+      if (!rows.length && !extra) return;
       const open = !this.collapsed.has('sec:' + key);
       out.push(h('div', {
         class: 'side-head' + (open ? ' is-open' : ''),
-        onclick: () => {
-          if (open) this.collapsed.add('sec:' + key); else this.collapsed.delete('sec:' + key);
-          this.renderSidebar();
-        },
+        onclick: () => this.toggleSection('sec:' + key),
       }, [
         h('span', { class: 'twisty' + (open ? ' is-open' : ''), text: '▸' }),
         h('span', { class: 'side-head-label', text: label }),
@@ -285,7 +295,7 @@ class App {
       onclick: o.run,
       oncontextmenu: o.menu ? (e) => { e.preventDefault(); this.menu(e.currentTarget, o.menu()); } : null,
     }, [
-      h('span', { class: o.dot ? 'tree-dot' : 'tree-ico', text: o.dot ? '' : (o.icon || '▪') }),
+      h('span', { class: o.dot ? 'tree-dot' : 'tree-ico', text: o.dot ? '' : (o.icon ?? '▪') }),
       h('span', { class: 'tree-name', text: label }),
       o.count !== undefined ? h('span', { class: 'count', text: o.count }) : null,
     ]);
@@ -365,7 +375,9 @@ class App {
     section('notes', 'Notes', walk(tree, '', 0));
 
     // --- views: saved bases, then every folder as a table ---
-    section('views', 'Views', [
+    // Folders are in the tree above, with "Open as table" on right-click, so
+    // listing every one of them again here was the same thing twice.
+    section('views', 'Bases', [
       ...this.views.map((v) => leaf(v.name, {
         icon: v.icon || '▦',
         active: this.current && this.current.id === v.id,
@@ -378,11 +390,6 @@ class App {
             this.renderSidebar();
           } },
         ],
-      })),
-      ...(this.folders || []).map((f) => leaf(f.folder, {
-        icon: '▦', count: f.n, title: `${f.folder} as a table`,
-        run: () => this.openDatabase(
-          { name: f.folder, source: { folder: f.folder }, view: 'table' }, true),
       })),
     ], h('div', {
       class: 'tree-row tree-add', style: '--depth:1',
@@ -401,24 +408,43 @@ class App {
         active: this.current && this.current.id === id,
         run: () => this.openPluginView(id),
       })),
-      ...this.plugins.ribbon
-        .filter((r) => ![...this.plugins.views.values()].some((v) => v.plugin === r.plugin))
-        .map((r) => leaf(r.title || r.plugin, { icon: r.icon || '▪', run: (e) => r.run(e) })),
     ]);
 
     // --- tags ---
-    section('tags', 'Tags', (this.tags || []).map((t) => leaf('#' + t.tag, {
-      icon: '#', count: t.n,
+    const allTags = this.tags || [];
+    // The label already carries the #, so the row does not need an icon too.
+    const tagRows = (this.showAllTags ? allTags : allTags.slice(0, 6)).map((t) => leaf('#' + t.tag, {
+      icon: '', count: t.n,
       run: () => this.openDatabase({ name: '#' + t.tag, source: { tag: t.tag }, view: 'table' }, true),
-    })));
+    }));
+    if (allTags.length > 6) {
+      tagRows.push(h('div', {
+        class: 'tree-row tree-add', style: '--depth:1',
+        onclick: () => { this.showAllTags = !this.showAllTags; this.renderSidebar(); },
+      }, [h('span', {
+        class: 'tree-name',
+        text: this.showAllTags ? 'Show fewer' : `Show all ${allTags.length}`,
+      })]));
+    }
+    section('tags', 'Tags', tagRows);
 
-    // --- files ---
-    section('files', 'Files', (this.assets || []).map((a) => leaf(a.name, {
-      icon: KIND_ICON[a.kind] || '○',
-      title: `${a.path} · ${fileSize(a.size)}`,
+    const allFiles = this.assets || [];
+    const fileRows = (this.showAllFiles ? allFiles : allFiles.slice(0, 6)).map((a) => leaf(a.name, {
+      icon: KIND_ICON[a.kind] || '\u25cb',
+      title: `${a.path} \u00b7 ${fileSize(a.size)}`,
       run: () => this.openAsset(a),
       menu: () => this.assetMenuItems(a),
-    })));
+    }));
+    if (allFiles.length > 6) {
+      fileRows.push(h('div', {
+        class: 'tree-row tree-add', style: '--depth:1',
+        onclick: () => { this.showAllFiles = !this.showAllFiles; this.renderSidebar(); },
+      }, [h('span', {
+        class: 'tree-name',
+        text: this.showAllFiles ? 'Show fewer' : `Show all ${allFiles.length}`,
+      })]));
+    }
+    section('files', 'Files', fileRows);
 
     const root = h('div', { class: 'tree' }, out);
     this.dropTarget(root, '');

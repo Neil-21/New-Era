@@ -204,16 +204,23 @@ It is canvas plus a ~40 line force simulation - no graph library.
 
 ## The sidebar
 
-One tree, not a row of tabs. Every section collapses and remembers that it
-did:
+One tree, not a row of tabs, and it opens quiet: only **Notes** is expanded,
+the rest are one row each until you want them. Empty sections are left out
+entirely, long lists stop at six with a *show all*, and whatever you leave
+open is where it is next time.
 
 ```
-Notes    the folder tree, with counts
-Views    saved bases, then every folder as a table
-Tools    the graph and whatever your plugins registered
-Tags     every tag, from #inline ones and from `tags:` in frontmatter
+Notes    the folder tree, with counts          (open)
+Bases    your saved database views
+Tools    the graph and any plugin view
+Tags     from #inline tags and from `tags:` in frontmatter
 Files    attachments
 ```
+
+What is deliberately *not* in there: every folder repeated as a table (they
+are in the tree already, with *Open as table* on right-click) and one-shot
+plugin actions like export or insert-template, which are a keystroke away in
+`Ctrl+K` and were only ever noise in a list of places to go.
 
 Folders sort above notes and carry a note count. Drag a note onto a folder to
 move it on disk; links keep resolving because they match on basename. Right

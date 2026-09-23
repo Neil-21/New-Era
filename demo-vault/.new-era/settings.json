@@ -1,0 +1,23 @@
+{
+  "theme": "dark",
+  "accent": "#7c9cff",
+  "fontText": "system",
+  "editorSize": 16,
+  "editorLeading": 1.7,
+  "noteWidth": 760,
+  "coverHeight": 180,
+  "sidebarWidth": 250,
+  "highlight": "#e0c04e",
+  "newNoteFolder": "",
+  "attachmentMode": "subfolder",
+  "attachmentFolder": "attachments",
+  "showAttachments": false,
+  "collapsed": [
+    "sec:views",
+    "sec:files"
+  ],
+  "dailyFolder": "Daily",
+  "keys": {},
+  "disabledPlugins": [],
+  "plugins": {}
+}

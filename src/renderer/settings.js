@@ -18,6 +18,7 @@ export const DEFAULTS = {
   attachmentMode: 'subfolder',
   attachmentFolder: 'attachments',
   showAttachments: false,
+  collapsed: null,
   dailyFolder: 'Daily',
   keys: {},
   disabledPlugins: [],

@@ -148,3 +148,30 @@ test('index: filter values are bound, not interpolated', (t) => {
   assert.strictEqual(rows.length, 0, 'injection attempt must match nothing');
   assert.strictEqual(ix.query({ filters: [{ prop: 'status', op: 'bogus-op' }] }).length, 3);
 });
+
+test('a vault from before the rename keeps its settings and views', (t) => {
+  const v = vault();
+  // Simulate the old layout: config lives in .hermes, not .new-era.
+  const legacy = path.join(v, '.hermes');
+  fs.mkdirSync(legacy, { recursive: true });
+  fs.writeFileSync(path.join(legacy, 'views.json'), '[{"id":"keepme","name":"Projects"}]');
+  fs.writeFileSync(path.join(legacy, 'settings.json'), '{"theme":"midnight"}');
+
+  const ix = new Index(v);
+  t.after(() => { ix.close(); fs.rmSync(v, { recursive: true, force: true }); });
+
+  const moved = path.join(v, '.new-era');
+  assert.ok(fs.existsSync(moved), 'config folder is carried over, not abandoned');
+  assert.ok(!fs.existsSync(legacy), 'the old folder does not linger as a decoy');
+  assert.match(fs.readFileSync(path.join(moved, 'views.json'), 'utf8'), /keepme/);
+  assert.match(fs.readFileSync(path.join(moved, 'settings.json'), 'utf8'), /midnight/);
+  assert.strictEqual(ix.sync().total, 3, 'and the vault still indexes normally');
+});
+
+test('a fresh vault is untouched by the migration path', (t) => {
+  const v = vault();
+  const ix = new Index(v);
+  t.after(() => { ix.close(); fs.rmSync(v, { recursive: true, force: true }); });
+  assert.ok(fs.existsSync(path.join(v, '.new-era')));
+  assert.strictEqual(ix.sync().total, 3);
+});

@@ -50,8 +50,15 @@ const OPS = {
 class Index {
   constructor(vault) {
     this.vault = vault;
-    fs.mkdirSync(path.join(vault, '.new-era'), { recursive: true });
-    this.db = new DatabaseSync(path.join(vault, '.new-era', 'index.db'));
+    const dir = path.join(vault, '.new-era');
+    // Vaults made before the rename keep everything in .hermes. Carry it over
+    // once, rather than silently starting them empty.
+    const legacy = path.join(vault, '.hermes');
+    if (!fs.existsSync(dir) && fs.existsSync(legacy)) {
+      try { fs.renameSync(legacy, dir); } catch { /* fall through and start fresh */ }
+    }
+    fs.mkdirSync(dir, { recursive: true });
+    this.db = new DatabaseSync(path.join(dir, 'index.db'));
     this.db.exec('PRAGMA journal_mode = WAL');
     this.db.exec(SCHEMA);
   }
@@ -360,7 +367,7 @@ class Index {
         }
       }
       if (l.src === to) continue;
-      const key = l.src < to ? l.src + ' ' + to : to + ' ' + l.src;
+      const key = l.src < to ? l.src + '\u0000' + to : to + '\u0000' + l.src;
       if (seen.has(key)) continue;
       seen.add(key);
       edges.push({ s: l.src, t: to });

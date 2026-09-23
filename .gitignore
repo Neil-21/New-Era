@@ -2,6 +2,8 @@ node_modules/
 src/renderer.bundle.js
 src/renderer.bundle.css
 logseq/
-demo-vault/.new-era/index.db*
-# Ignore index caches from vaults opened with earlier builds too.
-demo-vault/.hermes/index.db*
+# The demo vault's .new-era folder is all generated state: the SQLite index,
+# saved views and per-vault settings. A fresh clone should get the defaults,
+# not whatever layout the last person left open.
+demo-vault/.new-era/
+demo-vault/.hermes/

@@ -67,10 +67,16 @@ export default {
       await api.vault.note.write(path, note.raw.slice(0, note.raw.length - note.body.length) + nextBody);
     };
 
-    const mount = async (el, ctx) => {
-      const path = ctx.notePath || api.app.currentNote();
+    const mount = async (el, ctx, override) => {
+      const path = override || ctx.notePath || api.app.currentNote();
       if (!path) {
-        el.replaceChildren(h('div', { class: 'db-empty', text: 'Open a note first, then reopen the board.' }));
+        el.replaceChildren(h('div', { class: 'db-empty' }, [
+          h('p', { text: 'A board is built from one note: its "## headings" become the columns.' }),
+          h('button', {
+            class: 'btn btn-primary', text: 'Choose a note\u2026',
+            onclick: (e) => pick(e.currentTarget, el, ctx),
+          }),
+        ]));
         return;
       }
       const note = await api.vault.note.read(path);
@@ -78,7 +84,7 @@ export default {
 
       const redraw = async (nextBody) => {
         await write(path, nextBody);
-        await mount(el, ctx);
+        await mount(el, ctx, path);
       };
 
       if (!cols.length) {
@@ -88,6 +94,10 @@ export default {
             class: 'btn btn-primary', text: 'Add Todo / Doing / Done',
             onclick: () => redraw(note.body.trimEnd()
               + '\n\n## Todo\n\n## Doing\n\n## Done\n'),
+          }),
+          h('button', {
+            class: 'btn', text: 'Board a different note\u2026',
+            onclick: (e) => pick(e.currentTarget, el, ctx),
           }),
         ]));
         return;
@@ -143,23 +153,44 @@ export default {
         board.append(column);
       }
 
+      const title = note.props.title || path.split('/').pop().replace(/\.md$/, '');
+      const folder = path.includes('/') ? path.slice(0, path.lastIndexOf('/')) : 'vault root';
+      const cardCount = cols.reduce((n, c) => n + c.cards.length, 0);
+
       el.replaceChildren(
         h('div', { class: 'db-toolbar' }, [
           h('div', { class: 'db-title' }, [
-            h('span', { class: 'db-icon', text: '▤' }),
-            h('span', { class: 'db-name-static', text: 'Kanban' }),
-            h('span', { class: 'db-source', text: path }),
+            h('span', { class: 'db-icon', text: note.props.icon || '▤' }),
+            h('div', { class: 'kanban-head' }, [
+              h('div', { class: 'db-name-static', text: title }),
+              h('div', { class: 'kanban-path', text: `${folder} \u00b7 board of ${cols.length} columns, ${cardCount} cards` }),
+            ]),
           ]),
           h('div', { class: 'db-actions' }, [
-            h('button', { class: 'btn', text: 'Open note', onclick: () => api.app.openNote(path) }),
-            h('button', { class: 'btn', text: 'Refresh', onclick: () => mount(el, ctx) }),
+            h('button', {
+              class: 'btn', text: 'Board another note\u2026',
+              onclick: (e) => pick(e.currentTarget, el, ctx),
+            }),
+            h('button', { class: 'btn', text: 'Open as note', onclick: () => api.app.openNote(path) }),
+            h('button', { class: 'btn', text: 'Refresh', onclick: () => mount(el, ctx, path) }),
           ]),
         ]),
         board,
       );
     };
 
-    api.addView({ id: 'board', name: 'Kanban board for this note', mount });
+    // Which note to board is a choice, so make it one instead of a guess.
+    async function pick(anchor, el, ctx) {
+      const notes = await api.vault.index.all();
+      if (!notes.length) return api.notice('This vault has no notes yet');
+      api.app.menu(anchor, notes.slice(0, 40).map((n) => ({
+        label: n.folder ? `${n.title}  \u2014  ${n.folder}` : n.title,
+        run: () => mount(el, ctx, n.path),
+      })));
+      return undefined;
+    }
+
+    api.addView({ id: 'board', name: 'Kanban', mount });
     api.addRibbon({
       icon: '▤', title: 'Kanban board',
       run: () => api.app.openViewById('kanban:board'),

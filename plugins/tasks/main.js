@@ -140,7 +140,7 @@ export default {
       await draw();
     };
 
-    api.addView({ id: 'all', name: 'Tasks across the vault', mount });
+    api.addView({ id: 'all', name: 'Tasks', mount });
     api.addRibbon({ icon: '✓', title: 'Tasks', run: () => api.app.openViewById('tasks:all') });
   },
 };

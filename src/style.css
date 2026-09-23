@@ -365,6 +365,16 @@ body.no-rail .rightbar { display: none; }
 }
 .twisty.is-open { transform: rotate(90deg); }
 .tree-name { overflow: hidden; text-overflow: ellipsis; }
+.tree-ico {
+  width: 14px;
+  flex: none;
+  text-align: center;
+  font-size: 11px;
+  opacity: .75;
+}
+.tree-add { color: var(--text-faint); font-size: 12.5px; }
+.tree-add:hover { color: var(--accent); }
+
 .tree-dot {
   width: 5px;
   height: 5px;
@@ -375,7 +385,17 @@ body.no-rail .rightbar { display: none; }
   margin-left: 3px;
   transition: opacity .12s var(--ease), background .12s var(--ease);
 }
-.tree-file.is-active .tree-dot { background: var(--accent); opacity: 1; }
+.tree-file.is-active .tree-ico {
+  width: 14px;
+  flex: none;
+  text-align: center;
+  font-size: 11px;
+  opacity: .75;
+}
+.tree-add { color: var(--text-faint); font-size: 12.5px; }
+.tree-add:hover { color: var(--accent); }
+
+.tree-dot { background: var(--accent); opacity: 1; }
 .tree-row .count { opacity: 0; transition: opacity .12s var(--ease); }
 .tree-dir:hover .count { opacity: 1; }
 .tree-row.is-drop {
@@ -902,6 +922,9 @@ body.no-rail .rightbar { display: none; }
   min-width: 120px;
   max-width: 340px;
 }
+.kanban-head { display: flex; flex-direction: column; gap: 1px; }
+.kanban-path { font-size: 12px; color: var(--text-faint); }
+
 .db-source {
   color: var(--text-faint);
   font-size: 12px;

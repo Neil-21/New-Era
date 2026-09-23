@@ -56,7 +56,7 @@ class App {
   layout() {
     this.el = {
       sidebar: h('div', { class: 'sidebar-body', id: 'sidebar-body' }),
-      ribbon: h('div', { class: 'ribbon' }),
+      ribbon: h('div', { class: 'ribbon' }), // unused; plugins render into Tools
       vaultName: h('button', {
         class: 'vault-name', onclick: (e) => this.vaultMenu(e.currentTarget),
       }),
@@ -68,7 +68,7 @@ class App {
 
     const tabs = ['files', 'search', 'tags', 'bases', 'media'].map((t) => h('button', {
       class: 'stab',
-      text: { files: 'Notes', search: 'Search', tags: 'Tags', bases: 'Bases', media: 'Files' }[t],
+      text: { files: 'Notes', search: 'Search', tags: 'Tags', bases: 'Views', media: 'Files' }[t],
       'data-tab': t,
       onclick: () => { this.sidebarTab = t; this.renderSidebar(); },
     }));
@@ -105,7 +105,6 @@ class App {
         // Vault switcher and settings live at the bottom, out of the way of the
         // thing you actually came here to do.
         h('div', { class: 'sidebar-foot' }, [
-          this.el.ribbon,
           h('div', { class: 'foot-row' }, [
             this.el.vaultName,
             h('button', {
@@ -514,46 +513,103 @@ class App {
     }, [h('span', { text: '#' + t.tag }), h('span', { class: 'count', text: t.n })]))));
   }
 
+  // Everything you can open that is not a note, laid out like the file tree
+  // rather than as a row of unlabelled buttons.
   async renderBases(body) {
     const folders = await newEra.index.folders();
-    body.replaceChildren(
-      h('div', { class: 'sidebar-actions' }, [
-        h('button', { class: 'btn-ghost', text: '+ New base', onclick: () => this.command('db.new') }),
-      ]),
-      h('div', { class: 'tree' }, [
-        ...this.views.map((v) => h('div', {
-          class: 'tree-row tree-file' + (this.current && this.current.id === v.id ? ' is-active' : ''),
-          style: '--depth:0',
-          onclick: () => this.openDatabase(v),
-          oncontextmenu: (e) => {
-            e.preventDefault();
-            this.menu(e.target, [{ label: 'Delete base', run: () => {
-              this.views = this.views.filter((x) => x.id !== v.id);
-              this.saveViews();
-              this.renderSidebar();
-            } }]);
-          },
-        }, [h('span', { text: (v.icon || '▦') + ' ' + v.name })])),
-        h('div', { class: 'tree-label', text: 'Folders as tables' }),
-        ...folders.map((f) => h('div', {
-          class: 'tree-row tree-file', style: '--depth:0',
-          onclick: () => this.openDatabase({ name: f.folder, source: { folder: f.folder }, view: 'table' }, true),
-        }, [h('span', { text: f.folder }), h('span', { class: 'count', text: f.n })])),
-      ]),
-    );
+
+    const group = (key, label, rows, action) => {
+      if (!rows.length && !action) return [];
+      const open = !this.collapsed.has('group:' + key);
+      const head = h('div', {
+        class: 'tree-row tree-dir', style: '--depth:0',
+        onclick: () => {
+          if (open) this.collapsed.add('group:' + key); else this.collapsed.delete('group:' + key);
+          this.renderSidebar();
+        },
+      }, [
+        h('span', { class: 'twisty' + (open ? ' is-open' : ''), text: '▸' }),
+        h('span', { class: 'tree-name', text: label }),
+        h('span', { class: 'count', text: rows.length }),
+      ]);
+      if (!open) return [head];
+      const body2 = rows.map((r) => r());
+      if (action) {
+        body2.push(h('div', {
+          class: 'tree-row tree-add', style: '--depth:1', onclick: action.run,
+        }, [h('span', { class: 'tree-name', text: action.label })]));
+      }
+      return [head, ...body2];
+    };
+
+    const row = (label, opts = {}) => () => h('div', {
+      class: 'tree-row tree-file' + (opts.active ? ' is-active' : ''),
+      style: '--depth:1',
+      title: opts.title || label,
+      onclick: opts.run,
+      oncontextmenu: opts.menu
+        ? (e) => { e.preventDefault(); this.menu(e.currentTarget, opts.menu()); }
+        : null,
+    }, [
+      h('span', { class: 'tree-ico', text: opts.icon || '▪' }),
+      h('span', { class: 'tree-name', text: label }),
+      opts.count !== undefined ? h('span', { class: 'count', text: opts.count }) : null,
+    ]);
+
+    const bases = this.views.map((v) => row(v.name, {
+      icon: v.icon || '▦',
+      active: this.current && this.current.id === v.id,
+      run: () => this.openDatabase(v),
+      menu: () => [
+        { label: 'Open', run: () => this.openDatabase(v) },
+        { label: 'Delete base', run: () => {
+          this.views = this.views.filter((x) => x.id !== v.id);
+          this.saveViews();
+          this.renderSidebar();
+        } },
+      ],
+    }));
+
+    const folderRows = folders.map((f) => row(f.folder, {
+      icon: '▦', count: f.n,
+      run: () => this.openDatabase(
+        { name: f.folder, source: { folder: f.folder }, view: 'table' }, true),
+    }));
+
+    // Plugin views and ribbon actions live here now instead of a button strip.
+    const tools = [
+      row('Graph', {
+        icon: '◍',
+        active: this.current && this.current.type === 'graph',
+        run: () => this.openGraph('global'),
+      }),
+      ...[...this.plugins.views.entries()].map(([id, v]) => row(v.name.replace(/\s*\(.*\)$/, ''), {
+        icon: '▤',
+        title: v.name,
+        active: this.current && this.current.id === id,
+        run: () => this.openPluginView(id),
+      })),
+      ...this.plugins.ribbon
+        .filter((r) => !/^(Kanban|Tasks|Data files)/i.test(r.title || ''))
+        .map((r) => row(r.title || r.plugin, {
+          icon: r.icon || '▪',
+          run: (e) => r.run(e),
+        })),
+    ];
+
+    body.replaceChildren(h('div', { class: 'tree' }, [
+      ...group('bases', 'Bases', bases,
+        { label: '+ New base', run: () => this.command('db.new') }),
+      ...group('folders', 'Folders as tables', folderRows),
+      ...group('tools', 'Tools', tools),
+    ]));
   }
 
+  // Plugin buttons are listed in the Tools group of the sidebar now, so there
+  // is no separate ribbon to paint. Kept as a hook because the plugin host
+  // calls it after enabling or disabling a plugin.
   renderRibbon() {
-    // Icon plus label. An icon row alone is a guessing game - nobody knows what
-    // the third glyph does.
-    this.el.ribbon.replaceChildren(
-      ...this.plugins.ribbon.map((r) => h('button', {
-        class: 'ribbon-btn', title: r.title || r.plugin, onclick: (e) => r.run(e),
-      }, [
-        h('span', { class: 'ribbon-ico', text: r.icon || '●' }),
-        h('span', { class: 'ribbon-label', text: r.title || r.plugin }),
-      ])),
-    );
+    if (this.sidebarTab === 'bases') this.renderSidebar();
   }
 
   // --- tabs ----------------------------------------------------------------

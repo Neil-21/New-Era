@@ -151,7 +151,7 @@ export default {
       draw();
     };
 
-    api.addView({ id: 'file', name: 'Data viewer (JSON, CSV, XLSX)', mount });
+    api.addView({ id: 'file', name: 'Data viewer', mount });
     api.addRibbon({
       icon: '☷', title: 'Data files',
       run: () => { api.app.openSidebarTab('media'); },

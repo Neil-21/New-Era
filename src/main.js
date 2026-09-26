@@ -5,11 +5,13 @@ const path = require('node:path');
 const { Index } = require('./db.js');
 const { parseFrontmatter, setFrontmatter } = require('./parse.js');
 const { readXlsx, readDelimited } = require('./sheet.js');
+const { History, writeAtomic } = require('./history.js');
 
 const CONFIG = path.join(app.getPath('userData'), 'config.json');
 
 let win = null;
 let ix = null;       // Index for the open vault
+let history = null;  // Past versions of every page, in <vault>/.new-era/history
 let watcher = null;
 let selfWrites = new Set(); // paths we just wrote, so the watcher ignores the echo
 
@@ -81,6 +83,7 @@ function openVault(dir) {
   if (watcher) { watcher.close(); watcher = null; }
   if (ix) ix.close();
   ix = new Index(dir);
+  history = new History(dir);
   const stats = ix.sync();
   writeConfig({ vault: dir, recent: [dir, ...(readConfig().recent || []).filter((r) => r !== dir)].slice(0, 8) });
   watch(dir);
@@ -109,7 +112,8 @@ function watch(dir) {
   };
   try {
     watcher = fs.watch(dir, { recursive: true }, (_e, file) => {
-      if (file && file.toLowerCase().endsWith('.md')) bump(file);
+      // Our own history copies live under .new-era; they are not vault edits.
+      if (file && file.toLowerCase().endsWith('.md') && !file.startsWith('.new-era')) bump(file);
     });
   } catch {
     const id = setInterval(() => bump(null), 5000);
@@ -130,11 +134,18 @@ function safe(rel) {
   return abs;
 }
 
-function writeNote(rel, content) {
+// Every save keeps the text it replaces in history first, and writes
+// atomically, so neither a bad edit nor a crash mid-save can lose a page.
+function writeNote(rel, content, reason = 'edit') {
   const abs = safe(rel);
   fs.mkdirSync(path.dirname(abs), { recursive: true });
-  fs.writeFileSync(abs, content, 'utf8');
+  let before = null;
+  try { before = fs.readFileSync(abs, 'utf8'); } catch { /* a new page */ }
+  if (before !== null && before !== content) {
+    try { history.snapshot(rel, before, reason); } catch (err) { console.error('history:', err.message); }
+  }
   selfWrites.add(rel);
+  writeAtomic(abs, content);
   return ix.upsert(rel);
 }
 
@@ -175,7 +186,9 @@ const api = {
     const dst = safe(to);
     if (fs.existsSync(dst)) throw new Error('A note already exists at ' + to);
     fs.mkdirSync(path.dirname(dst), { recursive: true });
+    try { history.snapshot(rel, fs.readFileSync(abs, 'utf8'), 'renamed'); } catch { /* best effort */ }
     fs.renameSync(abs, dst);
+    try { history.move(rel, to); } catch (err) { console.error('history:', err.message); }
     selfWrites.add(rel);
     selfWrites.add(to);
     ix.remove(rel);
@@ -196,12 +209,14 @@ const api = {
     if (fs.existsSync(dst)) throw new Error('A folder already exists at ' + nextRel);
     fs.mkdirSync(path.dirname(dst), { recursive: true });
     fs.renameSync(abs, dst);
+    try { history.move(rel, nextRel); } catch (err) { console.error('history:', err.message); }
     ix.sync();
     return { folder: nextRel };
   },
 
   // Trash, never unlink: a notes app must not be able to destroy your writing.
   'note:trash': async (_e, rel) => {
+    try { history.snapshot(rel, fs.readFileSync(safe(rel), 'utf8'), 'deleted'); } catch { /* best effort */ }
     await shell.trashItem(safe(rel));
     ix.remove(rel);
     return { path: rel };
@@ -332,6 +347,19 @@ const api = {
   },
 
   'web:preview': (_e, url) => linkPreview(url),
+
+  // --- history ------------------------------------------------------------
+  'history:list': (_e, rel) => (requireVault(), history.versions(rel)),
+  'history:read': (_e, rel, id) => (requireVault(), history.read(rel, id)),
+  'history:deleted': () => (requireVault(), history.deleted()),
+  // Restoring saves the current text as a version first, so a restore can
+  // itself be undone. A deleted page comes back at its old path.
+  'history:restore': (_e, rel, id) => {
+    requireVault();
+    writeNote(rel, history.read(rel, id), 'before-restore');
+    ix.resolveLinks();
+    return { path: rel };
+  },
 
   // Open a link in the user's real browser, never inside the app window.
   'shell:open': (_e, url) => {

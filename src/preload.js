@@ -56,6 +56,12 @@ contextBridge.exposeInMainWorld('newEra', {
   // Whole-window zoom for the "App size" setting: crisp, and every px scales.
   setZoom: (factor) => webFrame.setZoomFactor(Math.min(1.5, Math.max(0.7, factor))),
   web: { preview: call('web:preview') },
+  history: {
+    list: call('history:list'),
+    read: call('history:read'),
+    deleted: call('history:deleted'),
+    restore: call('history:restore'),
+  },
   openExternal: call('shell:open'),
   plugins: { list: call('plugins:list'), folder: call('plugins:folder') },
 

@@ -80,6 +80,7 @@ const INDEX = [
   ['keys', 'Keyboard shortcuts', 'keys', 'change any shortcut', 'keybinding hotkey shortcut key rebind'],
   ['plugins', 'Add-ons', 'plugins', 'turn add-ons on and off', 'extension addon kanban tasks export plugin'],
   ['vault', 'Vault folder', 'vault', 'open, switch or reindex your vault', 'folder vault reindex switch open location'],
+  ['history', 'Page history', 'vault', 'earlier versions and deleted pages', 'backup history restore undo recover deleted version'],
 ];
 
 const KEY_BY_LABEL = new Map(INDEX.map(([key, label]) => [label, key]));
@@ -478,6 +479,16 @@ export class Settings {
         this.row('Something looks out of date?', h('button', {
           class: 'btn', text: 'Reindex', onclick: () => this.app.command('vault.resync'),
         }), 'Re-reads every page from disk'),
+      ]),
+      this.card('Backups', [
+        this.row('Page history', h('span', { class: 'set-badge', text: '\u2705 Always on' }),
+          'Before a page is changed, renamed or deleted, the old version is copied to .new-era/history in this vault. Open any page and press History to go back.'),
+        this.row('Recover deleted pages', h('button', {
+          class: 'btn', text: 'Show deleted pages', onclick: () => this.app.openHistory(null),
+        }), 'Anything you delete can be brought back from here'),
+        this.row('Open the backup folder', h('button', {
+          class: 'btn', text: 'Show in folder', onclick: () => window.newEra.vault.reveal('.new-era/history'),
+        }), 'Plain files, so you can copy a page back by hand even if the app will not start'),
       ]),
     ]);
   }

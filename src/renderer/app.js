@@ -9,7 +9,7 @@ import { GraphView } from './graph.js';
 import { Keymap } from './keymap.js';
 import { Omni } from './omni.js';
 import { label as keyLabel } from './keymap.js';
-import { prettyTitle } from './dates.js';
+import { prettyTitle, formatDate } from './dates.js';
 
 const newEra = window.newEra;
 
@@ -21,6 +21,23 @@ const KIND_ICON = {
 const $ = (sel) => document.querySelector(sel);
 
 const VIEWABLE = /^(png|jpe?g|gif|webp|svg|avif|bmp|mp4|mov|webm|m4v|mp3|wav|ogg|m4a|flac|aac|pdf)$/i;
+
+const REASONS = {
+  edit: 'While writing',
+  renamed: 'Before it was renamed',
+  deleted: 'Before it was deleted',
+  'before-restore': 'Before a restore',
+};
+
+// "Today at 14:03", "Yesterday at 09:10", "5th Sep 2026 at 18:22".
+function whenLabel(ms, style) {
+  const d = new Date(ms);
+  const time = d.toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
+  const day = new Date(); day.setHours(0, 0, 0, 0);
+  const diff = Math.floor((day - new Date(d).setHours(0, 0, 0, 0)) / 86400000);
+  const date = diff === 0 ? 'Today' : diff === 1 ? 'Yesterday' : formatDate(d, style);
+  return `${date} at ${time}`;
+}
 
 function fileSize(n) {
   if (n < 1024) return n + ' B';
@@ -123,6 +140,10 @@ class App {
             class: 'page-action', title: 'See how your notes connect',
             onclick: () => this.command('view.graph'),
           }, [h('span', { text: '\u{1F578}️' }), h('span', { text: 'Map' })]),
+          h('button', {
+            class: 'page-action', title: 'Earlier versions of this page, and deleted pages',
+            onclick: () => this.openHistory(this.current && this.current.type === 'note' ? this.current.path : null),
+          }, [h('span', { text: '\u{1F558}' }), h('span', { text: 'History' })]),
           h('button', {
             class: 'page-action', title: 'What links to this page, and its headings',
             onclick: () => this.toggleRail(),
@@ -524,6 +545,90 @@ class App {
     return newEra.asset.open(a.path);
   }
 
+  // Earlier versions of one page, or (path = null) pages you deleted. Every
+  // version is a plain file under .new-era/history, so this is a window onto
+  // the backup, not the backup itself.
+  async openHistory(path) {
+    if (this.editor) { this.editor.flush(); this.editor.destroy(); this.editor = null; }
+    this.closeGraph();
+    this.db = null;
+    const id = 'history:' + (path || '*deleted');
+    this.current = { type: 'history', id };
+    const name = path ? prettyTitle(path.split('/').pop().replace(/\.md$/, ''), this.settings.values.dateFormat) : '';
+    this.pushTab({ type: 'history', id, path, title: path ? `\u{1F558} ${name}` : '\u{1F5D1}️ Deleted pages' });
+    this.el.right.replaceChildren();
+    this.renderTabs();
+
+    const style = this.settings.values.dateFormat;
+    const items = path
+      ? (await newEra.history.list(path)).map((v) => ({ ...v, path }))
+      : (await newEra.history.deleted()).map((d) => ({ ...d, reason: 'deleted' }));
+
+    const list = h('div', { class: 'history-items' });
+    const preview = h('section', { class: 'history-preview' });
+
+    const show = async (item, btn) => {
+      for (const b of list.children) b.classList.toggle('is-active', b === btn);
+      const text = await newEra.history.read(item.path, item.id);
+      const label = path ? whenLabel(item.time, style) : item.path.replace(/\.md$/, '');
+      preview.replaceChildren(
+        h('div', { class: 'history-bar' }, [
+          h('div', { class: 'history-bar-text' }, [
+            h('div', { class: 'history-when', text: label }),
+            h('div', { class: 'history-why', text: path ? REASONS[item.reason] || item.reason : 'Deleted ' + whenLabel(item.time, style).replace(/^T/, 't') }),
+          ]),
+          h('button', {
+            class: 'btn btn-primary',
+            text: path ? '↩️  Restore this version' : '♻️  Bring this page back',
+            onclick: async () => {
+              const ok = path
+                ? window.confirm('Put this version back? The page as it is now is saved in history first, so you can undo this.')
+                : true;
+              if (!ok) return;
+              const r = await newEra.history.restore(item.path, item.id);
+              await this.refresh();
+              this.toast(path ? 'Restored. The previous text is in history too.' : 'Brought back ' + r.path.replace(/\.md$/, ''));
+              this.tabs = this.tabs.filter((t) => t.id !== id);
+              this.activeTab = null;
+              this.openNote(r.path);
+            },
+          }),
+        ]),
+        h('pre', { class: 'history-text', text }),
+      );
+    };
+
+    if (!items.length) {
+      list.append(h('div', { class: 'history-empty', text: path
+        ? 'No earlier versions yet. A copy is saved every few minutes while you write, and before any rename or delete.'
+        : 'Nothing deleted. Pages you delete will wait here so you can bring them back.' }));
+      preview.append(h('div', { class: 'history-hint', text: '\u{1F6DF} Your pages are backed up automatically.' }));
+    }
+    for (const item of items) {
+      const btn = h('button', { class: 'history-item', onclick: () => show(item, btn) }, [
+        h('span', { class: 'history-item-when', text: path ? whenLabel(item.time, style) : item.path.split('/').pop().replace(/\.md$/, '') }),
+        h('span', { class: 'history-item-why', text: path
+          ? `${REASONS[item.reason] || item.reason} · ${fileSize(item.size)}`
+          : `${item.path.includes('/') ? item.path.slice(0, item.path.lastIndexOf('/')) + ' · ' : ''}deleted ${whenLabel(item.time, style).replace(/^T/, 't')}` }),
+      ]);
+      list.append(btn);
+    }
+
+    this.el.content.replaceChildren(h('div', { class: 'history' }, [
+      h('aside', { class: 'history-side' }, [
+        h('h2', { text: path ? `\u{1F558} History of ${name}` : '\u{1F5D1}️ Deleted pages' }),
+        h('p', { class: 'history-intro', text: path
+          ? 'A copy is kept every few minutes while you write, and before any rename, delete or restore.'
+          : 'Every page you delete is kept here. Pick one to see it, then bring it back.' }),
+        path ? h('button', { class: 'btn-ghost history-switch', text: '\u{1F5D1}️ See deleted pages', onclick: () => this.openHistory(null) }) : null,
+        list,
+      ]),
+      preview,
+    ]));
+    if (items.length) show(items[0], list.firstChild);
+    this.renderSidebar();
+  }
+
   openAssetView(a) {
     if (this.editor) { this.editor.flush(); this.editor.destroy(); this.editor = null; }
     this.closeGraph();
@@ -781,6 +886,7 @@ class App {
         const name = await this.prompt('New name', path.split('/').pop().replace(/\.md$/, ''));
         if (name) this.renameNote(path, name);
       } },
+      { label: '\u{1F558}  Page history\u2026', run: () => this.openHistory(path) },
       { label: 'Reveal in file manager', run: () => newEra.vault.reveal(path) },
       { label: 'Move to trash', run: async () => {
         await newEra.note.trash(path);
@@ -922,6 +1028,7 @@ class App {
     if (t.type === 'plugin') return this.openPluginView(t.id);
     if (t.type === 'settings') return this.openSettings();
     if (t.type === 'asset') return this.openAssetView(t.asset);
+    if (t.type === 'history') return this.openHistory(t.path);
     return this.openDatabase(t.spec);
   }
 
@@ -977,6 +1084,8 @@ class App {
         if (btn) btn.click(); else this.toast('Open a note first');
       } },
       { id: 'plugins.folder', name: 'Open plugins folder', run: () => newEra.plugins.folder() },
+      { id: 'note.history', name: 'Page history (earlier versions of this page)', run: () => this.openHistory(this.lastNotePath || null) },
+      { id: 'vault.deleted', name: 'Recover deleted pages', run: () => this.openHistory(null) },
     ];
   }
 

@@ -6,7 +6,7 @@ import { label as keyLabel, fromEvent } from './keymap.js';
 
 export const DEFAULTS = {
   theme: 'dark',
-  accent: '#7c9cff',
+  accent: '#2383e2',
   fontText: 'system',
   editorSize: 16,
   editorLeading: 1.7,
@@ -32,7 +32,7 @@ const FONTS = {
   mono: 'var(--font-mono)',
 };
 
-const ACCENTS = ['#7c9cff', '#8b7cf6', '#ec6a9c', '#f08c4b', '#3fb984', '#48b0d0', '#c9a227', '#d1495b'];
+const ACCENTS = ['#2383e2', '#7c9cff','#8b7cf6', '#ec6a9c', '#f08c4b', '#3fb984', '#48b0d0', '#c9a227', '#d1495b'];
 const HIGHLIGHTS = ['#e0c04e', '#7ad17a', '#69b7e8', '#e08ab8', '#c79bf0', '#e0885a'];
 
 // What the omni-search and the settings filter look through. Keywords are the

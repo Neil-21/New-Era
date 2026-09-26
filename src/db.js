@@ -251,7 +251,8 @@ class Index {
   }
 
   all() {
-    return this.db.prepare('SELECT path, title, folder, mtime FROM notes ORDER BY path').all();
+    return this.db.prepare(
+      "SELECT path, title, folder, mtime, json_extract(props, '$.icon') AS icon FROM notes ORDER BY path").all();
   }
 
   search(q, limit = 50) {

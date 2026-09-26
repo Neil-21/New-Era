@@ -51,7 +51,7 @@ class App {
     newEra.on('command', (cmd) => this.command(cmd));
     window.addEventListener('keydown', (e) => this.hotkey(e));
     this.keymap.load(this.settings.values.keys);
-    this.setCrumb('Search notes, files, settings\u2026');
+    this.setCrumb(this.el.crumbText.textContent);
     await this.plugins.loadAll(this.settings.values.disabledPlugins || []);
     this.renderRibbon();
   }
@@ -72,57 +72,54 @@ class App {
     };
 
 
-    this.el.crumbText = h('span', { class: 'crumb-text', text: 'Search notes, files, settings\u2026' });
-    this.el.crumb = h('button', {
-      class: 'titlebar-crumb no-drag', title: 'Search everything',
-      onclick: () => this.omni.open(),
-    }, [
-      h('span', { class: 'crumb-ico', text: '\u2315' }),
-      this.el.crumbText,
-      h('span', { class: 'crumb-key' }),
-    ]);
+    // The breadcrumb sits in the page's own top bar, the way Notion does it.
+    this.el.crumbText = h('span', { class: 'crumb-text' });
+    this.el.crumb = h('div', { class: 'topbar-crumb' }, [this.el.crumbText]);
     document.documentElement.dataset.platform = newEra.platform || 'win32';
 
     return h('div', { class: 'app' }, [
-      // One drag strip across the top. The OS still owns the window buttons on
-      // the right (titleBarOverlay), so we only reserve room for them.
+      // One drag strip across the top holding the tabs. The OS still owns the
+      // window buttons on the right (titleBarOverlay), so we reserve room.
       h('div', { class: 'titlebar' }, [
         h('div', { class: 'titlebar-left' }, [
           h('button', {
-            class: 'icon-btn no-drag', text: '\u2630', title: 'Toggle sidebar',
+            class: 'icon-btn no-drag', text: '☰', title: 'Toggle sidebar',
             onclick: () => this.toggleSidebar(),
           }),
         ]),
-        this.el.crumb,
-        h('div', { class: 'titlebar-right' }, [
-          h('button', {
-            class: 'icon-btn no-drag', text: '\u25cd', title: 'Graph view',
-            onclick: () => this.command('view.graph'),
-          }),
-          h('button', {
-            class: 'icon-btn no-drag', text: '\u25e7', title: 'Toggle right panel',
-            onclick: () => this.toggleRail(),
-          }),
-        ]),
+        this.el.tabbar,
       ]),
       h('aside', { class: 'sidebar' }, [
         this.toolbar(),
         this.el.sidebar,
-        // Vault switcher and settings live at the bottom, out of the way of the
-        // thing you actually came here to do.
         h('div', { class: 'sidebar-foot' }, [
-          h('div', { class: 'foot-row' }, [
-            this.el.vaultName,
-            h('button', {
-              class: 'icon-btn', text: '\u2699', title: 'Settings',
-              onclick: () => this.openSettings(),
-            }),
-          ]),
+          this.navRow('⚙', 'Settings', () => this.openSettings()),
         ]),
       ]),
-      h('main', { class: 'main' }, [this.el.tabbar, this.el.content]),
+      h('main', { class: 'main' }, [
+        h('div', { class: 'topbar' }, [
+          this.el.crumb,
+          h('button', {
+            class: 'icon-btn', text: '◍', title: 'Graph view',
+            onclick: () => this.command('view.graph'),
+          }),
+          h('button', {
+            class: 'icon-btn', text: '◧', title: 'Toggle right panel',
+            onclick: () => this.toggleRail(),
+          }),
+        ]),
+        this.el.content,
+      ]),
       this.el.right,
       this.el.toast,
+    ]);
+  }
+
+  navRow(icon, label, run, key) {
+    return h('div', { class: 'nav-row', onclick: run }, [
+      h('span', { class: 'nav-ico', text: icon }),
+      h('span', { class: 'nav-label', text: label }),
+      key ? h('span', { class: 'nav-key' }) : null,
     ]);
   }
 
@@ -238,29 +235,30 @@ class App {
     if (head) head.scrollIntoView({ block: 'start', behavior: 'smooth' });
   }
 
+  // Notion's sidebar top: the workspace switcher, then a few quick actions.
   toolbar() {
-    const btn = (label, title, run) => h('button', { class: 'tool-btn', title, onclick: run }, [
-      h('span', { text: label }),
-    ]);
     return h('div', { class: 'side-toolbar' }, [
-      btn('New note', 'New note', () => this.command('note.new')),
-      btn('Folder', 'New folder', () => this.newFolder()),
-      btn('Today', "Today's daily note", () => this.command('note.daily')),
-      h('div', { class: 'spacer' }),
-      h('button', {
-        class: 'tool-btn tool-icon', text: '⇅', title: 'Sort and display',
-        onclick: (e) => this.menu(e.currentTarget, [
-          { label: 'Name A → Z', run: () => { this.fileSort = 'name'; this.renderSidebar(); } },
-          { label: 'Name Z → A', run: () => { this.fileSort = 'name-desc'; this.renderSidebar(); } },
-          { label: 'Recently edited', run: () => { this.fileSort = 'modified'; this.renderSidebar(); } },
-          { label: (this.settings.values.showAttachments ? '✓ ' : '   ') + 'Attachments in the tree',
-            run: () => {
-              this.settings.set({ showAttachments: !this.settings.values.showAttachments });
-              this.renderSidebar();
-            } },
-          { label: 'Collapse everything', run: () => this.collapseAll() },
-        ]),
-      }),
+      h('div', { class: 'workspace-row' }, [
+        this.el.vaultName,
+        h('button', {
+          class: 'icon-btn', text: '⋯', title: 'Sort and display',
+          onclick: (e) => this.menu(e.currentTarget, [
+            { label: 'New folder…', run: () => this.newFolder() },
+            { label: 'Name A → Z', run: () => { this.fileSort = 'name'; this.renderSidebar(); } },
+            { label: 'Name Z → A', run: () => { this.fileSort = 'name-desc'; this.renderSidebar(); } },
+            { label: 'Recently edited', run: () => { this.fileSort = 'modified'; this.renderSidebar(); } },
+            { label: (this.settings.values.showAttachments ? '✓ ' : '   ') + 'Attachments in the tree',
+              run: () => {
+                this.settings.set({ showAttachments: !this.settings.values.showAttachments });
+                this.renderSidebar();
+              } },
+            { label: 'Collapse everything', run: () => this.collapseAll() },
+          ]),
+        }),
+      ]),
+      this.navRow('⌕', 'Search', () => this.omni.open(), true),
+      this.navRow('☀', 'Today', () => this.command('note.daily')),
+      this.navRow('✎', 'New page', () => this.command('note.new')),
     ]);
   }
 
@@ -280,7 +278,6 @@ class App {
       }, [
         h('span', { class: 'twisty' + (open ? ' is-open' : ''), text: '▸' }),
         h('span', { class: 'side-head-label', text: label }),
-        h('span', { class: 'count', text: rows.length }),
       ]));
       if (!open) return;
       out.push(...rows);
@@ -295,7 +292,7 @@ class App {
       onclick: o.run,
       oncontextmenu: o.menu ? (e) => { e.preventDefault(); this.menu(e.currentTarget, o.menu()); } : null,
     }, [
-      h('span', { class: o.dot ? 'tree-dot' : 'tree-ico', text: o.dot ? '' : (o.icon ?? '▪') }),
+      h('span', { class: 'tree-ico', text: o.icon ?? '▤' }),
       h('span', { class: 'tree-name', text: label }),
       o.count !== undefined ? h('span', { class: 'count', text: o.count }) : null,
     ]);
@@ -357,7 +354,7 @@ class App {
       }
       for (const f of node.files.sort(sortFiles)) {
         const el = leaf(f.title, {
-          depth, dot: true, title: f.path,
+          depth, icon: f.icon || '▤', title: f.path,
           active: this.current && this.current.path === f.path,
           draggable: true,
           run: () => this.openNote(f.path),
@@ -372,7 +369,7 @@ class App {
       return rows;
     };
 
-    section('notes', 'Notes', walk(tree, '', 0));
+    section('notes', 'Private', walk(tree, '', 0));
 
     // --- views: saved bases, then every folder as a table ---
     // Folders are in the tree above, with "Open as table" on right-click, so
@@ -577,7 +574,9 @@ class App {
     }, [
       h('span', { text: t.title }),
       h('button', { class: 'tab-x', text: '×', onclick: (e) => { e.stopPropagation(); this.closeTab(t); } }),
-    ])));
+    ])), h('button', {
+      class: 'icon-btn tab-new', text: '+', title: 'Open a page', onclick: () => this.omni.open(),
+    }));
   }
 
   isCurrent(t) {
@@ -844,8 +843,8 @@ class App {
   }
 
   setCrumb(text) {
-    if (this.el.crumbText) this.el.crumbText.textContent = text;
-    const hint = this.el.crumb && this.el.crumb.querySelector('.crumb-key');
+    if (this.el.crumbText) this.el.crumbText.textContent = text.replace(/\s*\/\s*/g, '  /  ');
+    const hint = document.querySelector('.nav-key');
     if (hint) hint.textContent = keyLabel(this.keymap.keys['palette.omni'] || '');
   }
 

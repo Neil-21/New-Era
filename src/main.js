@@ -1,5 +1,5 @@
 'use strict';
-const { app, BrowserWindow, ipcMain, dialog, shell, Menu } = require('electron');
+const { app, BrowserWindow, ipcMain, dialog, shell, Menu, net, session } = require('electron');
 const fs = require('node:fs');
 const path = require('node:path');
 const { Index } = require('./db.js');
@@ -12,6 +12,57 @@ let win = null;
 let ix = null;       // Index for the open vault
 let watcher = null;
 let selfWrites = new Set(); // paths we just wrote, so the watcher ignores the echo
+
+// --- link previews -----------------------------------------------------------
+// A link on its own line shows as a card with the page's title, blurb and
+// picture. Fetched here, not in the page, so any site works regardless of CORS.
+
+const previews = new Map();
+
+function decodeEntities(s) {
+  return String(s || '')
+    .replace(/&#(\d+);/g, (_m, n) => String.fromCodePoint(Number(n)))
+    .replace(/&#x([0-9a-f]+);/gi, (_m, n) => String.fromCodePoint(parseInt(n, 16)))
+    .replace(/&quot;/g, '"').replace(/&#39;|&apos;/g, "'")
+    .replace(/&lt;/g, '<').replace(/&gt;/g, '>').replace(/&amp;/g, '&')
+    .replace(/\s+/g, ' ').trim();
+}
+
+function metaTag(html, name) {
+  const tag = html.match(new RegExp(`<meta[^>]+(?:property|name)=["']${name}["'][^>]*>`, 'i'));
+  const content = tag && tag[0].match(/content=["']([^"']*)["']/i);
+  return content ? decodeEntities(content[1]) : '';
+}
+
+async function linkPreview(url) {
+  if (!/^https?:\/\//i.test(url)) throw new Error('Not a web link: ' + url);
+  if (previews.has(url)) return previews.get(url);
+  const res = await net.fetch(url, {
+    headers: { 'user-agent': 'Mozilla/5.0 (compatible; NewEra link preview)', accept: 'text/html,*/*' },
+    signal: AbortSignal.timeout(8000),
+  });
+  const type = res.headers.get('content-type') || '';
+  // Electron's net.fetch can leave res.url empty; fall back to what we asked for.
+  const base = res.url || url;
+  const out = { url: base };
+  if (type.startsWith('image/')) {
+    out.image = base;
+  } else if (type.includes('html')) {
+    // ponytail: regex over the first 400 kB, not an HTML parser. Meta tags live
+    // in <head>, and a parser would be a dependency for four fields.
+    const html = (await res.text()).slice(0, 400000);
+    const title = html.match(/<title[^>]*>([^<]*)</i);
+    out.title = metaTag(html, 'og:title') || metaTag(html, 'twitter:title') || decodeEntities(title && title[1]);
+    out.description = metaTag(html, 'og:description') || metaTag(html, 'description');
+    out.site = metaTag(html, 'og:site_name');
+    const image = metaTag(html, 'og:image') || metaTag(html, 'twitter:image');
+    if (image) {
+      try { out.image = new URL(image, base).href; } catch { /* bad URL, no picture */ }
+    }
+  }
+  previews.set(url, out);
+  return out;
+}
 
 function readConfig() {
   try { return JSON.parse(fs.readFileSync(CONFIG, 'utf8')); } catch { return {}; }
@@ -280,6 +331,8 @@ const api = {
     return values;
   },
 
+  'web:preview': (_e, url) => linkPreview(url),
+
   // Open a link in the user's real browser, never inside the app window.
   'shell:open': (_e, url) => {
     if (!/^https?:\/\//i.test(url)) throw new Error('Refusing to open: ' + url);
@@ -337,13 +390,22 @@ function createWindow() {
       : { color: '#1c1c1c', symbolColor: '#c2b3ab', height: 42 },
     trafficLightPosition: { x: 14, y: 12 },
     autoHideMenuBar: true,
-    webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true, sandbox: false },
+    webPreferences: {
+      preload: path.join(__dirname, 'preload.js'), contextIsolation: true, sandbox: false,
+      plugins: true, // Chromium's PDF viewer, for PDFs opened in a tab
+    },
   });
 
   // Keep the OS controls legible when the theme changes.
   ipcMain.on('chrome:theme', (_e, colors) => {
     if (process.platform === 'darwin' || !win) return;
-    try { win.setTitleBarOverlay({ ...colors, height: 38 }); } catch { /* not supported */ }
+    try { win.setTitleBarOverlay({ ...colors, height: 42 }); } catch { /* not supported */ }
+  });
+  // Anything an embed tries to open in a new window (a YouTube title, a
+  // Spotify "open app" button) goes to the real browser instead.
+  win.webContents.setWindowOpenHandler(({ url }) => {
+    if (/^https?:\/\//i.test(url)) shell.openExternal(url);
+    return { action: 'deny' };
   });
   win.loadFile(path.join(__dirname, 'index.html'));
 
@@ -384,6 +446,15 @@ function createWindow() {
 }
 
 app.whenReady().then(() => {
+  // YouTube refuses to play embeds that arrive with no Referer ("error 153"),
+  // and a page loaded from disk sends none. Give its player one.
+  session.defaultSession.webRequest.onBeforeSendHeaders(
+    { urls: ['https://www.youtube.com/*', 'https://www.youtube-nocookie.com/*'] },
+    (details, done) => {
+      details.requestHeaders.Referer = 'https://new-era.app/';
+      done({ requestHeaders: details.requestHeaders });
+    },
+  );
   createWindow();
   // `npm start -- ./some-vault` opens that folder; otherwise reopen the last one.
   const cli = process.argv.slice(2).find(

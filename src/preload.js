@@ -1,5 +1,5 @@
 'use strict';
-const { contextBridge, ipcRenderer } = require('electron');
+const { contextBridge, ipcRenderer, webFrame } = require('electron');
 
 const call = (ch) => (...args) => ipcRenderer.invoke(ch, ...args);
 
@@ -53,6 +53,9 @@ contextBridge.exposeInMainWorld('newEra', {
     reveal: call('shell:show'),
   },
   setChromeTheme: (colors) => ipcRenderer.send('chrome:theme', colors),
+  // Whole-window zoom for the "App size" setting: crisp, and every px scales.
+  setZoom: (factor) => webFrame.setZoomFactor(Math.min(1.5, Math.max(0.7, factor))),
+  web: { preview: call('web:preview') },
   openExternal: call('shell:open'),
   plugins: { list: call('plugins:list'), folder: call('plugins:folder') },
 

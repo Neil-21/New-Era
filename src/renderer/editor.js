@@ -10,7 +10,7 @@ import {
   EditorView, keymap, placeholder, Decoration, WidgetType, ViewPlugin,
   drawSelection, dropCursor, rectangularSelection, crosshairCursor, highlightSpecialChars,
 } from '@codemirror/view';
-import { EditorState, RangeSetBuilder, Prec } from '@codemirror/state';
+import { EditorState, RangeSetBuilder, Prec, StateField } from '@codemirror/state';
 import {
   syntaxTree, indentUnit, syntaxHighlighting, HighlightStyle,
   bracketMatching, foldKeymap,
@@ -126,30 +126,45 @@ class ImageWidget extends WidgetType {
   ignoreEvent() { return false; }
 }
 
-// Notion-style web embeds. A bare URL alone on a line becomes a live iframe for
-// providers that allow framing, and a link card for everything else - most sites
-// send X-Frame-Options: DENY and would render an empty box.
+// Notion-style web embeds. A link alone on a line becomes a live player for
+// providers that allow framing, and a preview card for everything else - most
+// sites send X-Frame-Options: DENY and would render an empty box.
+// Each entry: pattern, player URL, and the frame's size.
 const FRAMERS = [
-  [/(?:youtube\.com\/watch\?v=|youtu\.be\/)([\w-]{6,})/, (m) => `https://www.youtube.com/embed/${m[1]}`, '16/9'],
-  [/youtube\.com\/embed\/[\w-]+/, (m) => 'https://' + m[0].replace(/^https?:\/\//, ''), '16/9'],
-  [/vimeo\.com\/(\d+)/, (m) => `https://player.vimeo.com/video/${m[1]}`, '16/9'],
-  [/open\.spotify\.com\/(track|album|playlist|episode)\/(\w+)/, (m) => `https://open.spotify.com/embed/${m[1]}/${m[2]}`, '4/1'],
-  [/figma\.com\/(file|design|proto|board)\/[\w/-]+/, (m) => `https://www.figma.com/embed?embed_host=new-era&url=https://${m[0].replace(/^https?:\/\//, '')}`, '16/10'],
-  [/codepen\.io\/([\w-]+)\/pen\/([\w-]+)/, (m) => `https://codepen.io/${m[1]}/embed/${m[2]}?default-tab=result`, '4/3'],
-  [/loom\.com\/share\/(\w+)/, (m) => `https://www.loom.com/embed/${m[1]}`, '16/9'],
-  [/docs\.google\.com\/[\w/.-]+/, (m) => 'https://' + m[0].replace(/^https?:\/\//, '') + '?embedded=true', '4/3'],
+  [/(?:youtube\.com\/(?:watch\?(?:[^#\s]*&)?v=|shorts\/|live\/|embed\/)|youtu\.be\/)([\w-]{6,})/,
+    (m) => `https://www.youtube.com/embed/${m[1]}?rel=0`, () => ({ aspectRatio: '16/9' })],
+  [/vimeo\.com\/(?:video\/)?(\d+)/, (m) => `https://player.vimeo.com/video/${m[1]}`, () => ({ aspectRatio: '16/9' })],
+  [/open\.spotify\.com\/(?:intl-[\w-]+\/)?(track|album|playlist|episode|show|artist)\/(\w+)/,
+    (m) => `https://open.spotify.com/embed/${m[1]}/${m[2]}`,
+    (m) => ({ height: m[1] === 'track' || m[1] === 'episode' ? '152px' : '352px' })],
+  [/soundcloud\.com\/[\w-]+\/[\w-]+/,
+    (m) => `https://w.soundcloud.com/player/?url=${encodeURIComponent('https://' + m[0])}&visual=true`,
+    () => ({ height: '300px' })],
+  [/music\.apple\.com\/([\w/-]+)/, (m) => `https://embed.music.apple.com/${m[1]}`, () => ({ height: '450px' })],
+  [/figma\.com\/(file|design|proto|board)\/[\w/-]+/,
+    (m) => `https://www.figma.com/embed?embed_host=new-era&url=https://${m[0].replace(/^https?:\/\//, '')}`,
+    () => ({ aspectRatio: '16/10' })],
+  [/codepen\.io\/([\w-]+)\/pen\/([\w-]+)/,
+    (m) => `https://codepen.io/${m[1]}/embed/${m[2]}?default-tab=result`, () => ({ aspectRatio: '4/3' })],
+  [/loom\.com\/share\/(\w+)/, (m) => `https://www.loom.com/embed/${m[1]}`, () => ({ aspectRatio: '16/9' })],
+  [/docs\.google\.com\/[\w/.-]+/,
+    (m) => 'https://' + m[0].replace(/^https?:\/\//, '') + '?embedded=true', () => ({ aspectRatio: '4/3' })],
 ];
 
 function framer(url) {
-  for (const [re, build, ratio] of FRAMERS) {
+  for (const [re, build, size] of FRAMERS) {
     const m = url.match(re);
-    if (m) return { src: build(m), ratio };
+    if (m) return { src: build(m), style: size(m) };
   }
   return null;
 }
 
+function hostOf(url) {
+  try { return new URL(url).hostname.replace(/^www\./, ''); } catch { return url; }
+}
+
 class EmbedWidget extends WidgetType {
-  constructor(url, forced) { super(); this.url = url; this.forced = forced; }
+  constructor(url, forced, preview) { super(); this.url = url; this.forced = forced; this.preview = preview; }
   eq(o) { return o.url === this.url && o.forced === this.forced; }
   toDOM() {
     const wrap = document.createElement('div');
@@ -159,26 +174,51 @@ class EmbedWidget extends WidgetType {
       const frame = document.createElement('iframe');
       frame.src = f ? f.src : this.url;
       frame.loading = 'lazy';
-      frame.allow = 'accelerometer; clipboard-write; encrypted-media; picture-in-picture; fullscreen';
-      frame.referrerPolicy = 'no-referrer';
-      frame.style.aspectRatio = f ? f.ratio : '16/9';
-      wrap.append(frame);
+      frame.allow = 'autoplay; clipboard-write; encrypted-media; picture-in-picture; fullscreen';
+      frame.allowFullscreen = true;
+      Object.assign(frame.style, f ? f.style : { aspectRatio: '16/9' });
+      // Under every player, a plain way out to the real site.
+      const cap = document.createElement('div');
+      cap.className = 'cm-embed-open';
+      cap.dataset.open = this.url;
+      cap.textContent = `Open on ${hostOf(this.url)} ↗`;
+      wrap.append(frame, cap);
       return wrap;
     }
-    let host = this.url;
-    try { host = new URL(this.url).hostname.replace(/^www\./, ''); } catch { /* not a URL */ }
+    // Everything else: a card that fills in the page's title, blurb and picture.
     wrap.classList.add('is-card');
+    wrap.dataset.open = this.url;
+    const pic = document.createElement('div');
+    pic.className = 'cm-card-pic';
     const body = document.createElement('div');
     body.className = 'cm-card-body';
     const title = document.createElement('div');
     title.className = 'cm-card-title';
-    title.textContent = host;
+    title.textContent = hostOf(this.url);
+    const desc = document.createElement('div');
+    desc.className = 'cm-card-desc';
     const sub = document.createElement('div');
     sub.className = 'cm-card-url';
-    sub.textContent = this.url;
-    body.append(title, sub);
-    wrap.append(body);
-    wrap.dataset.open = this.url;
+    sub.textContent = '\u{1F517} ' + hostOf(this.url);
+    body.append(title, desc, sub);
+    wrap.append(body, pic);
+    if (this.preview) {
+      wrap.classList.add('is-loading');
+      this.preview(this.url).then((p) => {
+        if (p.title) title.textContent = p.title;
+        if (p.description) desc.textContent = p.description;
+        if (p.site) sub.textContent = '\u{1F517} ' + p.site;
+        if (p.image) {
+          const img = document.createElement('img');
+          img.src = p.image;
+          img.alt = '';
+          img.onerror = () => pic.remove();
+          pic.append(img);
+          wrap.classList.add('has-pic');
+        }
+      }).catch(() => { /* offline or blocked: the plain card still works */ })
+        .finally(() => wrap.classList.remove('is-loading'));
+    }
     return wrap;
   }
   ignoreEvent() { return false; }
@@ -255,7 +295,7 @@ function livePreview(ctx) {
         const forced = line.text.match(EMBED_LINE_RE);
         const bare = line.text.match(URL_LINE_RE);
         if (forced || bare) {
-          show(new EmbedWidget((forced || bare)[1], !!forced));
+          show(new EmbedWidget((forced || bare)[1], !!forced, ctx.preview));
           continue;
         }
         const md = line.text.trim().match(/^!\[([^\]]*)\]\(([^)\s]+)\)$/);
@@ -323,6 +363,30 @@ function livePreview(ctx) {
             }
             // A line already replaced by an embed owns every byte of it.
             if (claimed(node.from, node.to)) return;
+            // [text](url): show only the text, as a link you can click.
+            if (node.name === 'Link' && live(node.from)) {
+              const kids = [];
+              for (let c = node.node.firstChild; c; c = c.nextSibling) kids.push(c);
+              const marksIn = kids.filter((c) => c.name === 'LinkMark');
+              const url = kids.find((c) => c.name === 'URL');
+              if (url && marksIn.length >= 2 && marksIn[1].from > marksIn[0].to) {
+                const href = state.doc.sliceString(url.from, url.to);
+                marks.push([marksIn[0].to, marksIn[1].from,
+                  Decoration.mark({ class: 'cm-weblink', attributes: { 'data-href': href, title: href } })]);
+              }
+              return;
+            }
+            if (node.name === 'URL' && live(node.from)) {
+              const parent = node.node.parent && node.node.parent.name;
+              if (parent === 'Link') { marks.push([node.from, node.to, hidden]); return; }
+              if (parent !== 'Image') {
+                // A bare link in the middle of a sentence.
+                const href = state.doc.sliceString(node.from, node.to);
+                marks.push([node.from, node.to,
+                  Decoration.mark({ class: 'cm-weblink', attributes: { 'data-href': href, title: href } })]);
+              }
+              return;
+            }
             if (node.name === 'TaskMarker') {
               if (!live(node.from)) return;
               const txt = state.doc.sliceString(node.from, node.to);
@@ -395,6 +459,40 @@ function livePreview(ctx) {
       return b.finish();
     }
   }, { decorations: (v) => v.decorations });
+}
+
+// --- title echo --------------------------------------------------------------
+// Many notes start with "# Title", which the big page title already shows.
+// Hide that first heading (and the blank line after it) unless the cursor is
+// on it, so the page does not say its own name twice.
+
+function titleEcho(state, title) {
+  const want = String(title || '').trim().toLowerCase();
+  if (!want) return null;
+  let n = 1;
+  while (n <= state.doc.lines && n <= 3 && !state.doc.line(n).text.trim()) n++;
+  if (n > state.doc.lines || n > 3) return null;
+  const line = state.doc.line(n);
+  const m = line.text.match(/^#\s+(.+?)\s*#*\s*$/);
+  if (!m || m[1].trim().toLowerCase() !== want) return null;
+  let to = line.to;
+  if (n < state.doc.lines && !state.doc.line(n + 1).text.trim()) to = state.doc.line(n + 1).to;
+  return { from: 0, to, heading: line };
+}
+
+function hideTitleEcho(title) {
+  const build = (state) => {
+    const echo = titleEcho(state, title);
+    if (!echo) return Decoration.none;
+    const head = state.selection.main.head;
+    if (head >= echo.heading.from && head <= echo.heading.to) return Decoration.none;
+    return Decoration.set([Decoration.replace({ block: true }).range(echo.from, echo.to)]);
+  };
+  return StateField.define({
+    create: build,
+    update: (v, tr) => (tr.docChanged || tr.selection ? build(tr.state) : v),
+    provide: (f) => EditorView.decorations.from(f),
+  });
 }
 
 // --- "you can write here" cues ----------------------------------------------
@@ -478,7 +576,7 @@ const BLOCKS = [
   { label: 'Divider', hint: 'Horizontal rule', insert: '\n---\n' },
   { label: 'Table', hint: 'Markdown table', insert: '| Name | Status |\n| --- | --- |\n|  |  |' },
   { label: 'Link to note', hint: 'Wikilink to another note', insert: '[[]]', cursor: 2 },
-  { label: 'Web embed', hint: 'YouTube, Figma, Spotify, Loom…', insert: '!()', cursor: 2 },
+  { label: 'Video, music or web link', hint: 'YouTube, Spotify, Vimeo, or any website', ask: 'Paste the link' },
   { label: 'Image', hint: 'By URL or vault path', insert: '![]()', cursor: 4 },
 ];
 
@@ -530,6 +628,21 @@ function slashMenu(view, opts) {
 
   const choose = (x) => {
     const head = view.state.selection.main.head;
+    if (x.ask) {
+      // Drop the "/query", then ask. A link alone on its line becomes the embed.
+      view.dispatch({ changes: { from: slashPos, to: head, insert: '' } });
+      close();
+      Promise.resolve(opts.prompt ? opts.prompt(x.ask) : null).then((url) => {
+        const clean = (url || '').trim();
+        if (!clean) return view.focus();
+        const at = view.state.selection.main.head;
+        const line = view.state.doc.lineAt(at);
+        const insert = (line.text.trim() ? '\n' : '') + clean + '\n';
+        view.dispatch({ changes: { from: at, insert }, selection: { anchor: at + insert.length } });
+        return view.focus();
+      });
+      return;
+    }
     view.dispatch({
       changes: { from: slashPos, to: head, insert: x.insert },
       selection: { anchor: slashPos + (x.cursor ?? x.insert.length) },
@@ -564,11 +677,11 @@ function slashMenu(view, opts) {
 const theme = EditorView.theme({
   '&': {
     fontSize: 'calc(var(--editor-size) * var(--fill-scale, 1))',
-    height: '100%', background: 'transparent', color: 'var(--text)',
+    background: 'transparent', color: 'var(--text)',
   },
   '.cm-scroller': {
     fontFamily: 'var(--font-text)', lineHeight: 'var(--editor-leading)',
-    padding: '0 0 45vh', overflowX: 'hidden',
+    padding: '0 0 24px', overflowX: 'hidden',
   },
   '.cm-content': {
     maxWidth: 'var(--note-width)', margin: '0 auto', padding: '0 var(--note-gutter)',
@@ -606,6 +719,7 @@ export function createEditor(parent, opts) {
   const ctx = {
     exists: opts.exists || (() => true),
     asset: opts.asset || ((s) => s),
+    preview: opts.preview,
   };
   // The editor holds only the body. Frontmatter is edited in the properties
   // panel and carried along here untouched, so the cursor never falls into it.
@@ -613,10 +727,13 @@ export function createEditor(parent, opts) {
   const save = debounce(() => opts.onChange(prefix + view.state.doc.toString()), 400);
   let slash = null;
 
+  const startState = EditorState.create({ doc: opts.doc || '' });
+  const echo = titleEcho(startState, opts.title);
   const view = new EditorView({
     parent,
     state: EditorState.create({
       doc: opts.doc || '',
+      selection: { anchor: echo ? Math.min(echo.to + 1, startState.doc.length) : 0 },
       extensions: [
         history(),
         drawSelection(),
@@ -638,6 +755,7 @@ export function createEditor(parent, opts) {
         EditorView.lineWrapping,
         placeholder('Start writing here…  Type / to add a heading, list, picture and more'),
         livePreview(ctx),
+        hideTitleEcho(opts.title),
         writingCues,
         theme,
         Prec.high(keymap.of([
@@ -654,11 +772,19 @@ export function createEditor(parent, opts) {
             const before = u.state.doc.sliceString(Math.max(0, fb - 1), fb);
             if (before && !/\s/.test(before)) return;
             if (u.state.doc.lineAt(tb).text.trim().startsWith('```')) return;
-            slash = slashMenu(view, { onClose: () => { slash = null; } });
+            slash = slashMenu(view, { onClose: () => { slash = null; }, prompt: opts.prompt });
           });
         }),
         EditorView.domEventHandlers({
           paste(e, view) {
+            const pasted = (e.clipboardData?.getData('text/plain') || '').trim();
+            const sel = view.state.selection.main;
+            if (!sel.empty && /^https?:\/\/\S+$/.test(pasted)) {
+              e.preventDefault();
+              const words = view.state.sliceDoc(sel.from, sel.to);
+              view.dispatch({ changes: { from: sel.from, to: sel.to, insert: `[${words}](${pasted})` } });
+              return true;
+            }
             const files = [...(e.clipboardData?.items || [])]
               .filter((i) => i.kind === 'file').map((i) => i.getAsFile()).filter(Boolean);
             if (!files.length || !opts.onAttach) return false;
@@ -685,6 +811,22 @@ export function createEditor(parent, opts) {
               e.preventDefault();
               newLineAtEnd(view);
               return true;
+            }
+            const web = e.target.closest('.cm-weblink');
+            if (web) { e.preventDefault(); opts.onExternal(web.dataset.href); return true; }
+            if (e.ctrlKey || e.metaKey) {
+              const pos = view.posAtCoords({ x: e.clientX, y: e.clientY });
+              if (pos !== null) {
+                const line = view.state.doc.lineAt(pos);
+                for (const m of line.text.matchAll(/https?:\/\/[^\s)\]>]+/g)) {
+                  const from = line.from + m.index;
+                  if (pos >= from && pos <= from + m[0].length) {
+                    e.preventDefault();
+                    opts.onExternal(m[0]);
+                    return true;
+                  }
+                }
+              }
             }
             const link = e.target.closest('.cm-wikilink');
             if (link) { e.preventDefault(); opts.onLink(link.dataset.link); return true; }

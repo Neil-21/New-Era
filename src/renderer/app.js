@@ -9,6 +9,7 @@ import { GraphView } from './graph.js';
 import { Keymap } from './keymap.js';
 import { Omni } from './omni.js';
 import { label as keyLabel } from './keymap.js';
+import { prettyTitle } from './dates.js';
 
 const newEra = window.newEra;
 
@@ -18,6 +19,14 @@ const KIND_ICON = {
 };
 
 const $ = (sel) => document.querySelector(sel);
+
+const VIEWABLE = /^(png|jpe?g|gif|webp|svg|avif|bmp|mp4|mov|webm|m4v|mp3|wav|ogg|m4a|flac|aac|pdf)$/i;
+
+function fileSize(n) {
+  if (n < 1024) return n + ' B';
+  if (n < 1024 * 1024) return (n / 1024).toFixed(0) + ' KB';
+  return (n / 1048576).toFixed(1) + ' MB';
+}
 
 // Coral, amber, green, teal, blue, violet, pink, lime: far enough apart to
 // tell folders apart at a glance. FNV-1a spreads similar names across them.
@@ -115,9 +124,9 @@ class App {
             onclick: () => this.command('view.graph'),
           }, [h('span', { text: '\u{1F578}️' }), h('span', { text: 'Map' })]),
           h('button', {
-            class: 'page-action', title: 'Show or hide page details',
+            class: 'page-action', title: 'What links to this page, and its headings',
             onclick: () => this.toggleRail(),
-          }, [h('span', { text: '\u{1F4CB}' }), h('span', { text: 'Details' })]),
+          }, [h('span', { text: '\u{1F517}' }), h('span', { text: 'Connections' })]),
         ]),
         this.el.content,
       ]),
@@ -145,6 +154,7 @@ class App {
       this.collapsed = new Set(this.settings.values.collapsed);
     }
     this.keymap.load(this.settings.values.keys);
+    document.body.classList.toggle('no-rail', !this.settings.values.showRail);
     await this.refresh();
     if (!this.current) {
       const first = this.notes[0];
@@ -173,8 +183,11 @@ class App {
     ]);
   }
 
+  // Connections (mentions, outline, links) is for people who want it; most
+  // pages never need it, so it starts closed and remembers your choice.
   toggleRail() {
-    document.body.classList.toggle('no-rail');
+    const open = document.body.classList.toggle('no-rail') === false;
+    this.settings.set({ showRail: open });
   }
 
   async refresh() {
@@ -305,7 +318,8 @@ class App {
       style: `--depth:${o.depth ?? 1}`,
       title: o.title || label,
       draggable: o.draggable ? 'true' : null,
-      onclick: o.run,
+      onclick: (e) => { this.newTabNext = e.ctrlKey || e.metaKey; o.run(); },
+      onauxclick: (e) => { if (e.button === 1) { this.newTabNext = true; o.run(); } },
       oncontextmenu: o.menu ? (e) => { e.preventDefault(); this.menu(e.currentTarget, o.menu()); } : null,
     }, [
       o.icon ? h('span', { class: 'tree-ico', text: o.icon }) : null,
@@ -384,7 +398,7 @@ class App {
         }));
       }
       for (const f of node.files.sort(sortFiles)) {
-        const el = leaf(f.title, {
+        const el = leaf(prettyTitle(f.title, this.settings.values.dateFormat), {
           depth, title: f.path,
           active: this.current && this.current.path === f.path,
           draggable: true,
@@ -499,13 +513,64 @@ class App {
     ]);
   }
 
-  // Data files open in the viewer; everything else goes to the OS.
+  // Pictures, video, sound and PDFs open in a tab; data files in the data
+  // viewer; anything else goes to the program your computer uses for it.
   openAsset(a) {
     if (['json', 'csv', 'tsv', 'xlsx'].includes(a.ext) && this.plugins.views.has('data-viewer:file')) {
       this.dataFile = a.path;
       return this.openPluginView('data-viewer:file');
     }
+    if (VIEWABLE.test(a.ext)) return this.openAssetView(a);
     return newEra.asset.open(a.path);
+  }
+
+  openAssetView(a) {
+    if (this.editor) { this.editor.flush(); this.editor.destroy(); this.editor = null; }
+    this.closeGraph();
+    this.db = null;
+    const id = 'asset:' + a.path;
+    this.current = { type: 'asset', id };
+    this.pushTab({ type: 'asset', id, asset: a, title: a.name });
+    this.el.right.replaceChildren();
+
+    const src = this.assetUrl(a.path);
+    const kind = /^(mp4|mov|webm|m4v)$/i.test(a.ext) ? 'video'
+      : /^(mp3|wav|ogg|m4a|flac|aac)$/i.test(a.ext) ? 'audio'
+        : /^pdf$/i.test(a.ext) ? 'pdf' : 'image';
+    let media;
+    if (kind === 'image') {
+      // Click to flip between "fit the window" and actual size.
+      media = h('img', { class: 'viewer-img', src, alt: a.name, onclick: (e) => e.target.classList.toggle('is-zoomed') });
+    } else if (kind === 'pdf') {
+      media = h('iframe', { class: 'viewer-pdf', src });
+    } else {
+      media = h(kind, { class: 'viewer-' + kind, src, controls: true });
+    }
+    const folder = a.path.includes('/') ? a.path.slice(0, a.path.lastIndexOf('/')) : 'top of your vault';
+    const embed = /^(png|jpe?g|gif|webp|svg|avif|bmp|mp4|mov|webm|m4v|mp3|wav|ogg|m4a|flac|aac)$/i.test(a.ext)
+      ? `![[${a.path}]]` : `[${a.name}](${encodeURI(a.path)})`;
+    this.el.content.replaceChildren(h('div', { class: 'viewer' }, [
+      h('div', { class: 'viewer-bar' }, [
+        h('div', { class: 'viewer-text' }, [
+          h('div', { class: 'viewer-name', text: a.name }),
+          h('div', { class: 'viewer-sub', text: `In ${folder}` + (a.size ? ` · ${fileSize(a.size)}` : '') }),
+        ]),
+        this.lastNotePath ? h('button', {
+          class: 'btn btn-primary', text: '➕ Add to my last page',
+          onclick: async () => {
+            const target = this.lastNotePath;
+            const note = await newEra.note.read(target);
+            await newEra.note.write(target, note.raw.replace(/\s*$/, '\n\n') + embed + '\n');
+            this.toast('Added to ' + target.split('/').pop().replace(/\.md$/, ''));
+          },
+        }) : null,
+        h('button', { class: 'btn', text: '\u{1F4C2} Show in folder', onclick: () => newEra.vault.reveal(a.path) }),
+        h('button', { class: 'btn', text: 'Open with…', onclick: () => newEra.asset.open(a.path) }),
+      ]),
+      h('div', { class: 'viewer-stage viewer-stage-' + kind }, [media]),
+    ]));
+    this.renderTabs();
+    this.renderSidebar();
   }
 
   assetMenu(anchor, a) {
@@ -545,16 +610,26 @@ class App {
 
   // --- tabs ----------------------------------------------------------------
 
+  // Tabs behave like a browser's: opening a page reuses the tab you are in,
+  // unless you have typed in it (then it is kept) or asked for a new tab with
+  // Ctrl+click, middle-click or the + button. Tabs you have not kept show in
+  // italics, so it is clear which one will be replaced.
   renderTabs() {
     this.el.tabbar.replaceChildren(...this.tabs.map((t) => h('div', {
-      class: 'tab' + (this.isCurrent(t) ? ' is-active' : ''),
+      class: 'tab' + (this.isCurrent(t) ? ' is-active' : '') + (t.kept ? '' : ' is-preview'),
+      title: t.kept ? t.title : `${t.title} (double-click to keep this tab)`,
       onclick: () => this.openTab(t),
+      ondblclick: () => { t.kept = true; this.renderTabs(); },
+      onauxclick: (e) => { if (e.button === 1) this.closeTab(t); },
     }, [
       h('span', { text: t.title }),
-      h('button', { class: 'tab-x', text: '×', onclick: (e) => { e.stopPropagation(); this.closeTab(t); } }),
+      h('button', { class: 'tab-x', text: '×', title: 'Close', onclick: (e) => { e.stopPropagation(); this.closeTab(t); } }),
     ])), h('button', {
-      class: 'icon-btn tab-new', text: '+', title: 'Open a page', onclick: () => this.omni.open(),
+      class: 'icon-btn tab-new', text: '+', title: 'Open a page in a new tab',
+      onclick: () => { this.newTabNext = true; this.omni.open(); },
     }));
+    const active = this.el.tabbar.querySelector('.tab.is-active');
+    if (active) active.scrollIntoView({ block: 'nearest', inline: 'nearest' });
   }
 
   isCurrent(t) {
@@ -563,18 +638,29 @@ class App {
   }
 
   pushTab(tab) {
-    if (!this.tabs.some((t) => (t.type === 'note' ? t.path === tab.path : t.id === tab.id))) {
-      this.tabs.push(tab);
-      if (this.tabs.length > 12) this.tabs.shift();
+    const same = this.tabs.find((t) => (t.type === 'note' ? t.path === tab.path : t.id === tab.id));
+    if (same) {
+      Object.assign(same, { title: tab.title });
+      this.activeTab = same;
+    } else {
+      const at = this.activeTab ? this.tabs.indexOf(this.activeTab) : -1;
+      if (!this.newTabNext && at >= 0 && !this.activeTab.kept) this.tabs[at] = tab;
+      else this.tabs.splice(at >= 0 ? at + 1 : this.tabs.length, 0, tab);
+      // ponytail: a hard cap of 8, dropping the oldest tab that is not open.
+      while (this.tabs.length > 8) this.tabs.splice(this.tabs.findIndex((t) => t !== tab), 1);
+      this.activeTab = tab;
     }
+    this.newTabNext = false;
     this.renderTabs();
   }
 
   closeTab(tab) {
+    const i = this.tabs.indexOf(tab);
     this.tabs = this.tabs.filter((t) => t !== tab);
+    if (this.activeTab === tab) this.activeTab = null;
     this.renderTabs();
     if (this.isCurrent(tab)) {
-      const next = this.tabs[this.tabs.length - 1];
+      const next = this.tabs[Math.min(i, this.tabs.length - 1)];
       if (next) this.openTab(next);
       else this.renderWelcome();
     }
@@ -593,15 +679,18 @@ class App {
     // local graph still needs to know which note it is centred on.
     this.lastNotePath = path;
     this.dirty = false;
-    this.pushTab({ type: 'note', path, title: this.current.title });
+    this.pushTab({ type: 'note', path, title: prettyTitle(this.current.title, this.settings.values.dateFormat) });
 
     const host = h('div', { class: 'editor-host' });
+    const foot = h('div', { class: 'page-foot' });
     this.el.content.replaceChildren(h('div', { class: 'note' }, [
       renderPageHeader({
         path, props: note.props, title: note.props.title || this.current.title, app: this,
       }),
       host,
+      foot,
     ]));
+    this.renderMentions(path, foot);
 
     const exists = new Set(this.notes.map((n) => n.path.replace(/\.md$/, '').toLowerCase()));
     const existsBase = new Set(this.notes.map((n) => n.path.split('/').pop().replace(/\.md$/, '').toLowerCase()));
@@ -609,6 +698,7 @@ class App {
     this.editor = createEditor(host, {
       doc: note.body,
       prefix: note.raw.slice(0, note.raw.length - note.body.length),
+      title: note.props.title || this.current.title,
       exists: (t) => exists.has(t.toLowerCase()) || existsBase.has(t.toLowerCase()),
       onChange: async (text) => {
         this.dirty = false;
@@ -632,8 +722,14 @@ class App {
       onAttachError: (err) => this.toast('Could not attach: ' + err.message),
       onLink: (target) => this.followLink(target),
       onExternal: (url) => newEra.openExternal(url).catch(() => this.toast('Could not open ' + url)),
+      preview: (url) => newEra.web.preview(url),
+      prompt: (label) => this.prompt(label),
     });
-    host.addEventListener('input', () => { this.dirty = true; }, true);
+    host.addEventListener('input', () => {
+      this.dirty = true;
+      // A tab you have typed in is one you meant to keep.
+      if (this.activeTab && !this.activeTab.kept) { this.activeTab.kept = true; this.renderTabs(); }
+    }, true);
 
     this.renderRight(path);
     this.renderSidebar();
@@ -695,47 +791,23 @@ class App {
     ];
   }
 
-  // --- right rail: properties + backlinks ----------------------------------
+  // --- connections panel, and "mentioned in" at the foot of the page -------
 
   async renderRight(path) {
-    const meta = await newEra.note.meta(path);
     const backs = await newEra.index.backlinks(path);
     const outs = await newEra.index.outlinks(path);
+    const meta = await newEra.note.meta(path);
     const props = (meta && meta.props) || {};
-
-    const rows = Object.entries(props).map(([k, v]) => h('div', { class: 'prop' }, [
-      h('div', { class: 'prop-key', text: k }),
-      h('input', {
-        class: 'prop-val', value: Array.isArray(v) ? v.join(', ') : String(v ?? ''),
-        onchange: async (e) => {
-          const next = Array.isArray(v) ? e.target.value.split(',').map((s) => s.trim()).filter(Boolean)
-            : e.target.value;
-          await newEra.note.setProps(path, { [k]: next });
-          if (this.editor) this.editor.setNote(await newEra.note.read(path));
-          this.toast(`${k} updated`);
-        },
-      }),
-    ]));
+    const style = this.settings.values.dateFormat;
 
     this.el.right.replaceChildren(
       h('div', { class: 'rail-sec' }, [
-        h('div', { class: 'rail-head' }, [
-          h('span', { text: '📋 Details' }),
-          h('button', { class: 'btn-ghost', text: '+ Add', onclick: async () => {
-            const key = await this.prompt('What should this detail be called?');
-            if (!key) return;
-            await newEra.note.setProps(path, { [key]: '' });
-            if (this.editor) this.editor.setNote(await newEra.note.read(path));
-            this.renderRight(path);
-          } }),
-        ]),
-        ...(rows.length ? rows : [h('div', { class: 'muted', text: 'No details yet. Add one, like "status" or "due".' })]),
-      ]),
-      h('div', { class: 'rail-sec' }, [
-        h('div', { class: 'rail-head', text: `🔗 Pages that mention this (${backs.length})` }),
+        h('div', { class: 'rail-head', text: `\u{1F517} Mentioned in (${backs.length})` }),
         ...(backs.length
-          ? backs.map((b) => h('a', { class: 'rail-link', text: b.title, onclick: () => this.openNote(b.path) }))
-          : [h('div', { class: 'muted', text: 'No other page mentions this one yet.' })]),
+          ? backs.map((b) => h('a', {
+            class: 'rail-link', text: prettyTitle(b.title, style), onclick: () => this.openNote(b.path),
+          }))
+          : [h('div', { class: 'muted', text: 'No other page mentions this one yet. Type [[ in any page to link here.' })]),
       ]),
       ...this.plugins.rails.map((panel) => {
         const host = h('div', { class: 'rail-sec' }, [
@@ -749,7 +821,7 @@ class App {
         return host;
       }),
       h('div', { class: 'rail-sec' }, [
-        h('div', { class: 'rail-head', text: `➡️ This page mentions (${outs.length})` }),
+        h('div', { class: 'rail-head', text: `➡️ Links on this page (${outs.length})` }),
         ...outs.map((o) => h('a', {
           class: 'rail-link' + (o.resolved || o.type === 'tag' ? '' : ' is-unresolved'),
           text: (o.type === 'tag' ? '#' : '') + o.target,
@@ -759,6 +831,29 @@ class App {
         })),
       ]),
     );
+  }
+
+  // Under the last line of a page: the pages that point here, as cards you
+  // can click. Nothing at all when there are none.
+  async renderMentions(path, foot) {
+    const backs = (await newEra.index.backlinks(path)).filter((b) => b.type !== 'tag');
+    if (!foot.isConnected || !backs.length) return;
+    const style = this.settings.values.dateFormat;
+    const byPath = new Map(this.notes.map((n) => [n.path, n]));
+    foot.replaceChildren(h('section', { class: 'mentions' }, [
+      h('h3', { text: `\u{1F517} Mentioned in ${backs.length} other page${backs.length > 1 ? 's' : ''}` }),
+      h('div', { class: 'mention-cards' }, backs.map((b) => {
+        const n = byPath.get(b.path);
+        const folder = b.path.includes('/') ? b.path.slice(0, b.path.lastIndexOf('/')) : '';
+        return h('button', { class: 'mention-card', onclick: () => this.openNote(b.path) }, [
+          h('span', { class: 'mention-ico', text: (n && n.icon) || '\u{1F4C4}' }),
+          h('span', { class: 'mention-text' }, [
+            h('span', { class: 'mention-title', text: prettyTitle(b.title, style) }),
+            folder ? h('span', { class: 'mention-folder', text: folder }) : null,
+          ]),
+        ]);
+      })),
+    ]));
   }
 
   // --- databases -----------------------------------------------------------
@@ -825,6 +920,8 @@ class App {
     if (t.type === 'note') return this.openNote(t.path);
     if (t.type === 'graph') return this.openGraph();
     if (t.type === 'plugin') return this.openPluginView(t.id);
+    if (t.type === 'settings') return this.openSettings();
+    if (t.type === 'asset') return this.openAssetView(t.asset);
     return this.openDatabase(t.spec);
   }
 
@@ -873,7 +970,7 @@ class App {
       { id: 'tab.next', name: 'Next tab', run: () => this.cycleTab(1) },
       { id: 'tab.prev', name: 'Previous tab', run: () => this.cycleTab(-1) },
       { id: 'view.localGraph', name: 'Local graph of this note', run: () => this.openGraph('local') },
-      { id: 'app.settings', name: 'Appearance settings', run: () => this.openSettings() },
+      { id: 'app.settings', name: 'Open settings', run: () => this.openSettings() },
       { id: 'view.sidebar', name: 'Toggle sidebar', run: () => this.toggleSidebar() },
       { id: 'note.cover', name: 'Add or change page cover', run: () => {
         const btn = document.querySelector('.page-adders .add-btn:last-child, .cover-tools .chip-btn');
@@ -985,13 +1082,23 @@ class App {
     return pop;
   }
 
+  // Settings is a page in its own tab, with room to breathe.
   openSettings(tab, highlight) {
     this.closeOverlay();
     if (tab) this.settings.tab = tab;
-    const overlay = h('div', {
-      class: 'overlay', onclick: (e) => { if (e.target === overlay) this.closeOverlay(); },
-    }, [h('div', { class: 'panel' }, [this.settings.panel(highlight)])]);
-    document.body.append(overlay);
+    if (this.editor) { this.editor.flush(); this.editor.destroy(); this.editor = null; }
+    this.closeGraph();
+    this.db = null;
+    const scroller = this.el.content.querySelector('.set-main');
+    const keep = this.current && this.current.type === 'settings' && scroller ? scroller.scrollTop : 0;
+    this.current = { type: 'settings', id: 'settings' };
+    this.pushTab({ type: 'settings', id: 'settings', title: '\u2699\uFE0F Settings' });
+    this.el.right.replaceChildren();
+    this.el.content.replaceChildren(this.settings.page(highlight));
+    // Re-rendering after a toggle should not throw you back to the top.
+    if (!highlight) this.el.content.querySelector('.set-main').scrollTop = keep;
+    this.renderTabs();
+    this.renderSidebar();
   }
 
   toggleSidebar() {

@@ -17,12 +17,16 @@ const KIND_ICON = {
   data: '\u2637', code: '\u2b1a', file: '\u25cb',
 };
 
-function fileSize(n) {
-  if (n < 1024) return n + ' B';
-  if (n < 1024 * 1024) return (n / 1024).toFixed(0) + ' KB';
-  return (n / 1048576).toFixed(1) + ' MB';
-}
 const $ = (sel) => document.querySelector(sel);
+
+// Coral, amber, green, teal, blue, violet, pink, lime: far enough apart to
+// tell folders apart at a glance. FNV-1a spreads similar names across them.
+const FOLDER_HUES = [8, 38, 145, 180, 212, 262, 325, 85];
+function folderHue(name) {
+  let h = 2166136261;
+  for (const c of name) h = Math.imul(h ^ c.charCodeAt(0), 16777619) >>> 0;
+  return FOLDER_HUES[h % FOLDER_HUES.length];
+}
 
 class App {
   constructor() {
@@ -32,9 +36,8 @@ class App {
     this.tabs = [];
     this.current = null;
     this.editor = null;
-    // Everything except Notes starts closed. The sidebar should open on the
-    // thing you came for, not on all five things at once.
-    this.collapsed = new Set(['sec:views', 'sec:tools', 'sec:tags', 'sec:files']);
+    // Folder and section keys the user has closed.
+    this.collapsed = new Set();
     this.plugins = new PluginHost(this);
     this.settings = new Settings(this);
     this.keymap = new Keymap(this);
@@ -51,7 +54,6 @@ class App {
     newEra.on('command', (cmd) => this.command(cmd));
     window.addEventListener('keydown', (e) => this.hotkey(e));
     this.keymap.load(this.settings.values.keys);
-    this.setCrumb(this.el.crumbText.textContent);
     await this.plugins.loadAll(this.settings.values.disabledPlugins || []);
     this.renderRibbon();
   }
@@ -72,41 +74,50 @@ class App {
     };
 
 
-    // The breadcrumb sits in the page's own top bar, the way Notion does it.
-    this.el.crumbText = h('span', { class: 'crumb-text' });
-    this.el.crumb = h('div', { class: 'topbar-crumb' }, [this.el.crumbText]);
+    // Search is the front door, so it sits top and centre where everyone looks.
+    this.el.searchKey = h('span', { class: 'search-key' });
     document.documentElement.dataset.platform = newEra.platform || 'win32';
 
     return h('div', { class: 'app' }, [
-      // One drag strip across the top holding the tabs. The OS still owns the
-      // window buttons on the right (titleBarOverlay), so we reserve room.
+      // One drag strip across the top. The OS still owns the window buttons on
+      // the right (titleBarOverlay), so we reserve room for them.
       h('div', { class: 'titlebar' }, [
         h('div', { class: 'titlebar-left' }, [
           h('button', {
-            class: 'icon-btn no-drag', text: '☰', title: 'Toggle sidebar',
+            class: 'icon-btn no-drag', text: '☰', title: 'Show or hide the sidebar',
             onclick: () => this.toggleSidebar(),
           }),
         ]),
-        this.el.tabbar,
+        h('button', { class: 'search-pill no-drag', onclick: () => this.omni.open() }, [
+          h('span', { class: 'search-pill-ico', text: '\u{1F50D}' }),
+          h('span', { class: 'search-pill-text', text: 'Search your notes, files and settings' }),
+          this.el.searchKey,
+        ]),
       ]),
       h('aside', { class: 'sidebar' }, [
         this.toolbar(),
         this.el.sidebar,
+        // Vault switcher sits where ChatGPT and Claude put the account.
         h('div', { class: 'sidebar-foot' }, [
-          this.navRow('⚙', 'Settings', () => this.openSettings()),
+          this.el.vaultMark = h('span', { class: 'vault-mark' }),
+          this.el.vaultName,
+          h('button', {
+            class: 'icon-btn', text: '⚙️', title: 'Settings',
+            onclick: () => this.openSettings(),
+          }),
         ]),
       ]),
       h('main', { class: 'main' }, [
         h('div', { class: 'topbar' }, [
-          this.el.crumb,
+          this.el.tabbar,
           h('button', {
-            class: 'icon-btn', text: '◍', title: 'Graph view',
+            class: 'page-action', title: 'See how your notes connect',
             onclick: () => this.command('view.graph'),
-          }),
+          }, [h('span', { text: '\u{1F578}️' }), h('span', { text: 'Map' })]),
           h('button', {
-            class: 'icon-btn', text: '◧', title: 'Toggle right panel',
+            class: 'page-action', title: 'Show or hide page details',
             onclick: () => this.toggleRail(),
-          }),
+          }, [h('span', { text: '\u{1F4CB}' }), h('span', { text: 'Details' })]),
         ]),
         this.el.content,
       ]),
@@ -115,11 +126,11 @@ class App {
     ]);
   }
 
-  navRow(icon, label, run, key) {
-    return h('div', { class: 'nav-row', onclick: run }, [
-      h('span', { class: 'nav-ico', text: icon }),
+  navRow(icon, label, run, o = {}) {
+    return h('div', { class: 'nav-row' + (o.active ? ' is-active' : ''), title: o.title || label, onclick: run }, [
+      h('span', { class: 'nav-ico', text: icon, style: `--tile:${o.tile || 'var(--accent)'}` }),
       h('span', { class: 'nav-label', text: label }),
-      key ? h('span', { class: 'nav-key' }) : null,
+      o.key ? h('span', { class: 'nav-key', text: keyLabel(this.keymap.keys[o.key] || '') }) : null,
     ]);
   }
 
@@ -127,6 +138,7 @@ class App {
     this.vault = state.vault;
     this.el.vaultName.textContent = state.vault.split(/[\\/]/).pop() || state.vault;
     this.el.vaultName.title = state.vault;
+    this.el.vaultMark.textContent = (this.el.vaultName.textContent[0] || '?').toUpperCase();
     this.views = await newEra.views.list();
     await this.settings.load();
     if (Array.isArray(this.settings.values.collapsed)) {
@@ -178,6 +190,7 @@ class App {
     }
     this.tags = await newEra.index.tags();
     this.folders = await newEra.index.folders();
+    document.body.classList.toggle('is-dense', this.notes.length > 40);
     this.renderSidebar();
   }
 
@@ -211,9 +224,10 @@ class App {
   renderWelcome() {
     this.el.right.replaceChildren();
     this.el.content.replaceChildren(h('div', { class: 'welcome' }, [
-      h('h1', { text: 'NEW ERA' }),
-      h('p', { text: 'Your notes are plain markdown files. Your databases are queries over them.' }),
-      h('button', { class: 'btn btn-primary', text: 'Open a vault folder', onclick: () => this.command('vault.pick') }),
+      h('div', { class: 'welcome-mark', text: '✦' }),
+      h('h1', { text: 'Welcome to New Era' }),
+      h('p', { text: 'Pick a folder to keep your notes in. Everything stays on your computer as plain files.' }),
+      h('button', { class: 'btn btn-primary btn-big', text: '📂  Choose a folder', onclick: () => this.command('vault.pick') }),
     ]));
   }
 
@@ -235,30 +249,32 @@ class App {
     if (head) head.scrollIntoView({ block: 'start', behavior: 'smooth' });
   }
 
-  // Notion's sidebar top: the workspace switcher, then a few quick actions.
+  // Sidebar top, Claude/ChatGPT style: the app, then one obvious primary action.
   toolbar() {
     return h('div', { class: 'side-toolbar' }, [
-      h('div', { class: 'workspace-row' }, [
-        this.el.vaultName,
+      h('div', { class: 'brand-row' }, [
+        h('span', { class: 'brand-mark', text: '✦' }),
+        h('span', { class: 'brand-name', text: 'New Era' }),
         h('button', {
           class: 'icon-btn', text: '⋯', title: 'Sort and display',
           onclick: (e) => this.menu(e.currentTarget, [
-            { label: 'New folder…', run: () => this.newFolder() },
-            { label: 'Name A → Z', run: () => { this.fileSort = 'name'; this.renderSidebar(); } },
-            { label: 'Name Z → A', run: () => { this.fileSort = 'name-desc'; this.renderSidebar(); } },
-            { label: 'Recently edited', run: () => { this.fileSort = 'modified'; this.renderSidebar(); } },
-            { label: (this.settings.values.showAttachments ? '✓ ' : '   ') + 'Attachments in the tree',
+            { label: '📁  New folder…', run: () => this.newFolder() },
+            { label: '🔤  Sort A → Z', run: () => { this.fileSort = 'name'; this.renderSidebar(); } },
+            { label: '🔤  Sort Z → A', run: () => { this.fileSort = 'name-desc'; this.renderSidebar(); } },
+            { label: '🕒  Newest first', run: () => { this.fileSort = 'modified'; this.renderSidebar(); } },
+            { label: (this.settings.values.showAttachments ? '✓ ' : '   ') + 'Show pictures and files',
               run: () => {
                 this.settings.set({ showAttachments: !this.settings.values.showAttachments });
                 this.renderSidebar();
               } },
-            { label: 'Collapse everything', run: () => this.collapseAll() },
+            { label: '📂  Fold all folders', run: () => this.collapseAll() },
           ]),
         }),
       ]),
-      this.navRow('⌕', 'Search', () => this.omni.open(), true),
-      this.navRow('☀', 'Today', () => this.command('note.daily')),
-      this.navRow('✎', 'New page', () => this.command('note.new')),
+      h('button', { class: 'new-page-btn', onclick: () => this.command('note.new') }, [
+        h('span', { class: 'new-page-plus', text: '+' }),
+        h('span', { text: 'New page' }),
+      ]),
     ]);
   }
 
@@ -292,10 +308,20 @@ class App {
       onclick: o.run,
       oncontextmenu: o.menu ? (e) => { e.preventDefault(); this.menu(e.currentTarget, o.menu()); } : null,
     }, [
-      h('span', { class: 'tree-ico', text: o.icon ?? '▤' }),
+      o.icon ? h('span', { class: 'tree-ico', text: o.icon }) : null,
       h('span', { class: 'tree-name', text: label }),
       o.count !== undefined ? h('span', { class: 'count', text: o.count }) : null,
     ]);
+
+    this.el.searchKey.textContent = keyLabel(this.keymap.keys['palette.omni'] || '');
+
+    // --- menu: a few fixed places to go ---
+    const cur = this.current || {};
+    out.push(h('div', { class: 'nav' }, [
+      this.navRow('📅', "Today's page", () => this.command('note.daily'), { tile: '#ffb020' }),
+      this.navRow('🕸️', 'Map of notes', () => this.openGraph('global'), { active: cur.type === 'graph', tile: '#a970ff' }),
+      this.navRow('🏷️', 'Browse by tag', () => this.omni.open('#'), { tile: '#2fc48d' }),
+    ]));
 
     // --- notes: the folder tree ---
     const tree = { dirs: new Map(), files: [] };
@@ -339,6 +365,11 @@ class App {
           oncontextmenu: (e) => { e.preventDefault(); this.folderMenu(e.currentTarget, full); },
         }, [
           h('span', { class: 'twisty' + (open ? ' is-open' : ''), text: '▸' }),
+          // Each folder keeps its own colour, so you find it by eye, not by reading.
+          h('span', {
+            class: 'folder-dot',
+            style: `--hue:${folderHue(name)}`,
+          }),
           h('span', { class: 'tree-name', text: name }),
           h('span', { class: 'count', text: total(child) }),
         ]);
@@ -354,7 +385,7 @@ class App {
       }
       for (const f of node.files.sort(sortFiles)) {
         const el = leaf(f.title, {
-          depth, icon: f.icon || '▤', title: f.path,
+          depth, title: f.path,
           active: this.current && this.current.path === f.path,
           draggable: true,
           run: () => this.openNote(f.path),
@@ -369,12 +400,12 @@ class App {
       return rows;
     };
 
-    section('notes', 'Private', walk(tree, '', 0));
+    section('notes', 'Your pages', walk(tree, '', 0));
 
     // --- views: saved bases, then every folder as a table ---
     // Folders are in the tree above, with "Open as table" on right-click, so
     // listing every one of them again here was the same thing twice.
-    section('views', 'Bases', [
+    section('views', 'Tables', [
       ...this.views.map((v) => leaf(v.name, {
         icon: v.icon || '▦',
         active: this.current && this.current.id === v.id,
@@ -388,60 +419,7 @@ class App {
           } },
         ],
       })),
-    ], h('div', {
-      class: 'tree-row tree-add', style: '--depth:1',
-      onclick: () => this.command('db.new'),
-    }, [h('span', { class: 'tree-name', text: '+ New base' })]));
-
-    // --- tools: the graph and anything a plugin registered ---
-    section('tools', 'Tools', [
-      leaf('Graph', {
-        icon: '◍',
-        active: this.current && this.current.type === 'graph',
-        run: () => this.openGraph('global'),
-      }),
-      ...[...this.plugins.views.entries()].map(([id, v]) => leaf(v.name, {
-        icon: '▤', title: `${v.name} (${v.plugin})`,
-        active: this.current && this.current.id === id,
-        run: () => this.openPluginView(id),
-      })),
     ]);
-
-    // --- tags ---
-    const allTags = this.tags || [];
-    // The label already carries the #, so the row does not need an icon too.
-    const tagRows = (this.showAllTags ? allTags : allTags.slice(0, 6)).map((t) => leaf('#' + t.tag, {
-      icon: '', count: t.n,
-      run: () => this.openDatabase({ name: '#' + t.tag, source: { tag: t.tag }, view: 'table' }, true),
-    }));
-    if (allTags.length > 6) {
-      tagRows.push(h('div', {
-        class: 'tree-row tree-add', style: '--depth:1',
-        onclick: () => { this.showAllTags = !this.showAllTags; this.renderSidebar(); },
-      }, [h('span', {
-        class: 'tree-name',
-        text: this.showAllTags ? 'Show fewer' : `Show all ${allTags.length}`,
-      })]));
-    }
-    section('tags', 'Tags', tagRows);
-
-    const allFiles = this.assets || [];
-    const fileRows = (this.showAllFiles ? allFiles : allFiles.slice(0, 6)).map((a) => leaf(a.name, {
-      icon: KIND_ICON[a.kind] || '\u25cb',
-      title: `${a.path} \u00b7 ${fileSize(a.size)}`,
-      run: () => this.openAsset(a),
-      menu: () => this.assetMenuItems(a),
-    }));
-    if (allFiles.length > 6) {
-      fileRows.push(h('div', {
-        class: 'tree-row tree-add', style: '--depth:1',
-        onclick: () => { this.showAllFiles = !this.showAllFiles; this.renderSidebar(); },
-      }, [h('span', {
-        class: 'tree-name',
-        text: this.showAllFiles ? 'Show fewer' : `Show all ${allFiles.length}`,
-      })]));
-    }
-    section('files', 'Files', fileRows);
 
     const root = h('div', { class: 'tree' }, out);
     this.dropTarget(root, '');
@@ -487,11 +465,11 @@ class App {
   }
 
   async newFolder() {
-    const name = await this.prompt('Folder name', 'New folder');
+    const name = await this.prompt('What do you want to call the folder?', 'New folder');
     if (!name) return;
     const clean = name.replace(/[\\:*?"<>|]/g, '-');
     await newEra.folder.create(clean);
-    const note = await newEra.note.create(clean + '/Untitled', '# Untitled\n\n');
+    const note = await newEra.note.create(clean + '/Untitled', '');
     await this.refresh();
     this.openNote(note.path);
   }
@@ -499,9 +477,9 @@ class App {
   folderMenu(anchor, folder) {
     this.menu(anchor, [
       { label: 'New note here', run: async () => {
-        const name = await this.prompt('Note name', 'Untitled');
+        const name = await this.prompt('What do you want to call your new page?', 'Untitled');
         if (!name) return;
-        const note = await newEra.note.create(folder + '/' + name, '# ' + name + '\n\n');
+        const note = await newEra.note.create(folder + '/' + name, '');
         await this.refresh();
         this.openNote(note.path);
       } },
@@ -629,10 +607,8 @@ class App {
     const existsBase = new Set(this.notes.map((n) => n.path.split('/').pop().replace(/\.md$/, '').toLowerCase()));
 
     this.editor = createEditor(host, {
-      doc: note.raw,
-      // Land the cursor on the body. At offset 0 the cursor sits inside the
-      // frontmatter, which would unfold it on every single open.
-      cursor: note.raw.length - note.body.length,
+      doc: note.body,
+      prefix: note.raw.slice(0, note.raw.length - note.body.length),
       exists: (t) => exists.has(t.toLowerCase()) || existsBase.has(t.toLowerCase()),
       onChange: async (text) => {
         this.dirty = false;
@@ -642,7 +618,13 @@ class App {
       asset: (src) => this.assetUrl(src),
       onAttach: async (file) => {
         const bytes = new Uint8Array(await file.arrayBuffer());
-        const saved = await newEra.asset.save(this.attachFolder(path), file.name || 'pasted.png', bytes);
+        // Clipboard images all arrive as "image.png"; name them after the note
+        // and the moment instead, so the attachments folder stays readable.
+        const ext = (file.type.split('/')[1] || 'png').replace('jpeg', 'jpg').replace(/\W.*/, '');
+        const stamp = new Date().toISOString().slice(0, 19).replace('T', ' ').replace(/:/g, '');
+        const name = !file.name || /^image\.\w+$/.test(file.name)
+          ? `${path.split('/').pop().replace(/\.md$/, '')} ${stamp}.${ext}` : file.name;
+        const saved = await newEra.asset.save(this.attachFolder(path), name, bytes);
         await this.refresh();
         this.toast(`Saved ${saved.path}`);
         return saved;
@@ -656,7 +638,6 @@ class App {
     this.renderRight(path);
     this.renderSidebar();
     this.renderTabs();
-    this.setCrumb((note.props.icon ? note.props.icon + '  ' : '') + path.replace(/\.md$/, ''));
     this.plugins.emit('note:open', { path });
     if (!force) this.editor.focus();
   }
@@ -674,7 +655,7 @@ class App {
     const hit = this.notes.find((n) => n.path.replace(/\.md$/i, '').toLowerCase() === clean)
       || this.notes.find((n) => n.path.split('/').pop().replace(/\.md$/i, '').toLowerCase() === clean);
     if (hit) return this.openNote(hit.path);
-    const made = await newEra.note.create(target, `# ${target}\n\n`);
+    const made = await newEra.note.create(target, '');
     await this.refresh();
     this.toast('Created ' + made.path);
     return this.openNote(made.path);
@@ -730,7 +711,7 @@ class App {
           const next = Array.isArray(v) ? e.target.value.split(',').map((s) => s.trim()).filter(Boolean)
             : e.target.value;
           await newEra.note.setProps(path, { [k]: next });
-          if (this.editor) this.editor.setDoc((await newEra.note.read(path)).raw);
+          if (this.editor) this.editor.setNote(await newEra.note.read(path));
           this.toast(`${k} updated`);
         },
       }),
@@ -739,22 +720,22 @@ class App {
     this.el.right.replaceChildren(
       h('div', { class: 'rail-sec' }, [
         h('div', { class: 'rail-head' }, [
-          h('span', { text: 'Properties' }),
-          h('button', { class: 'btn-ghost', text: '+', onclick: async () => {
-            const key = await this.prompt('Property name');
+          h('span', { text: '📋 Details' }),
+          h('button', { class: 'btn-ghost', text: '+ Add', onclick: async () => {
+            const key = await this.prompt('What should this detail be called?');
             if (!key) return;
             await newEra.note.setProps(path, { [key]: '' });
-            if (this.editor) this.editor.setDoc((await newEra.note.read(path)).raw);
+            if (this.editor) this.editor.setNote(await newEra.note.read(path));
             this.renderRight(path);
           } }),
         ]),
-        ...(rows.length ? rows : [h('div', { class: 'muted', text: 'No properties yet' })]),
+        ...(rows.length ? rows : [h('div', { class: 'muted', text: 'No details yet. Add one, like "status" or "due".' })]),
       ]),
       h('div', { class: 'rail-sec' }, [
-        h('div', { class: 'rail-head', text: `Backlinks (${backs.length})` }),
+        h('div', { class: 'rail-head', text: `🔗 Pages that mention this (${backs.length})` }),
         ...(backs.length
           ? backs.map((b) => h('a', { class: 'rail-link', text: b.title, onclick: () => this.openNote(b.path) }))
-          : [h('div', { class: 'muted', text: 'Nothing links here yet' })]),
+          : [h('div', { class: 'muted', text: 'No other page mentions this one yet.' })]),
       ]),
       ...this.plugins.rails.map((panel) => {
         const host = h('div', { class: 'rail-sec' }, [
@@ -768,7 +749,7 @@ class App {
         return host;
       }),
       h('div', { class: 'rail-sec' }, [
-        h('div', { class: 'rail-head', text: `Links (${outs.length})` }),
+        h('div', { class: 'rail-head', text: `➡️ This page mentions (${outs.length})` }),
         ...outs.map((o) => h('a', {
           class: 'rail-link' + (o.resolved || o.type === 'tag' ? '' : ' is-unresolved'),
           text: (o.type === 'tag' ? '#' : '') + o.target,
@@ -816,7 +797,6 @@ class App {
     this.el.right.replaceChildren();
     this.el.content.replaceChildren();
     this.graph = new GraphView(this.el.content, this, { mode: mode || 'global' });
-    this.setCrumb('Graph');
     this.renderSidebar();
     this.renderTabs();
   }
@@ -831,7 +811,6 @@ class App {
     this.pushTab({ type: 'plugin', id, title: view.name });
     this.el.right.replaceChildren();
     this.el.content.replaceChildren();
-    this.setCrumb(view.name);
     this.renderTabs();
     this.renderSidebar();
     try {
@@ -840,12 +819,6 @@ class App {
       this.el.content.append(h('div', { class: 'db-empty', text: 'View error: ' + err.message }));
     }
     return undefined;
-  }
-
-  setCrumb(text) {
-    if (this.el.crumbText) this.el.crumbText.textContent = text.replace(/\s*\/\s*/g, '  /  ');
-    const hint = document.querySelector('.nav-key');
-    if (hint) hint.textContent = keyLabel(this.keymap.keys['palette.omni'] || '');
   }
 
   openTab(t) {
@@ -948,10 +921,10 @@ class App {
   }
 
   async newNote() {
-    const name = await this.prompt('Note name', 'Untitled');
+    const name = await this.prompt('What do you want to call your new page?', 'Untitled');
     if (!name) return;
     const folder = this.settings.values.newNoteFolder;
-    const note = await newEra.note.create((folder ? folder + '/' : '') + name, `# ${name}\n\n`);
+    const note = await newEra.note.create((folder ? folder + '/' : '') + name, '');
     await this.refresh();
     this.openNote(note.path);
   }
@@ -963,7 +936,7 @@ class App {
     const path = `${folder}/${iso}.md`;
     const known = this.notes.find((n) => n.path === path);
     if (known) return this.openNote(path);
-    await newEra.note.create(path, `---\ndate: ${iso}\n---\n\n# ${iso}\n\n`);
+    await newEra.note.create(path, `---\ndate: ${iso}\n---\n\n`);
     await this.refresh();
     return this.openNote(path);
   }
@@ -1074,7 +1047,7 @@ class App {
           input,
           h('div', { class: 'prompt-actions' }, [
             h('button', { class: 'btn', text: 'Cancel', onclick: () => done(null) }),
-            h('button', { class: 'btn btn-primary', text: 'OK', onclick: () => done(input.value) }),
+            h('button', { class: 'btn btn-primary', text: 'Done', onclick: () => done(input.value) }),
           ]),
         ]),
       ]);

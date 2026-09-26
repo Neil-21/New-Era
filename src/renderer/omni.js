@@ -196,7 +196,7 @@ export class Omni {
           shown.push({
             kind: 'create', id: 'create:' + q, label: `Create note "${q}"`, hint: 'new note',
             run: async () => {
-              const note = await window.newEra.note.create(q, `# ${q}\n\n`);
+              const note = await window.newEra.note.create(q, '');
               await app.refresh();
               app.openNote(note.path);
             },

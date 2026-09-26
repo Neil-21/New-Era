@@ -331,10 +331,10 @@ function createWindow() {
   // would give us all three to reimplement badly.
   win = new BrowserWindow({
     width: 1440, height: 920, minWidth: 720, minHeight: 480,
-    backgroundColor: '#191919',
+    backgroundColor: '#1f1b1a',
     titleBarStyle: 'hidden',
     titleBarOverlay: process.platform === 'darwin' ? undefined
-      : { color: '#1c1c1c', symbolColor: '#9a9a9a', height: 38 },
+      : { color: '#1c1c1c', symbolColor: '#c2b3ab', height: 42 },
     trafficLightPosition: { x: 14, y: 12 },
     autoHideMenuBar: true,
     webPreferences: { preload: path.join(__dirname, 'preload.js'), contextIsolation: true, sandbox: false },

@@ -21,7 +21,7 @@ export function renderPageHeader(opts) {
 
   if (banner) {
     coverEl.append(h('div', { class: 'cover-tools' }, [
-      h('button', { class: 'chip-btn', text: 'Change cover', onclick: (e) => coverMenu(e.target, app, set) }),
+      h('button', { class: 'chip-btn', text: '🖼️  Change picture', onclick: (e) => coverMenu(e.target, app, set) }),
       h('button', { class: 'chip-btn', text: 'Remove', onclick: () => set({ banner: undefined, cover: undefined }) }),
     ]));
   }
@@ -36,8 +36,8 @@ export function renderPageHeader(opts) {
 
   // --- add buttons (Notion shows these on hover when empty) ---
   const adders = h('div', { class: 'page-adders' }, [
-    icon ? null : h('button', { class: 'add-btn', text: '🙂  Add icon', onclick: (e) => iconMenu(e.target, app, set) }),
-    banner ? null : h('button', { class: 'add-btn', text: '🖼  Add cover', onclick: (e) => coverMenu(e.target, app, set) }),
+    icon ? null : h('button', { class: 'add-btn', text: '😀  Add an icon', onclick: (e) => iconMenu(e.target, app, set) }),
+    banner ? null : h('button', { class: 'add-btn', text: '🖼️  Add a cover picture', onclick: (e) => coverMenu(e.target, app, set) }),
   ]);
 
   const titleEl = h('input', {

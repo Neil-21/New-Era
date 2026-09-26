@@ -10,14 +10,13 @@ import {
   EditorView, keymap, placeholder, Decoration, WidgetType, ViewPlugin,
   drawSelection, dropCursor, rectangularSelection, crosshairCursor, highlightSpecialChars,
 } from '@codemirror/view';
-import { EditorState, RangeSetBuilder, Prec, StateField } from '@codemirror/state';
+import { EditorState, RangeSetBuilder, Prec } from '@codemirror/state';
 import {
   syntaxTree, indentUnit, syntaxHighlighting, HighlightStyle,
   bracketMatching, foldKeymap,
 } from '@codemirror/language';
 import { tags as t } from '@lezer/highlight';
 import { markdown, markdownLanguage } from '@codemirror/lang-markdown';
-import { yamlFrontmatter } from '@codemirror/lang-yaml';
 import { languages } from '@codemirror/language-data';
 import { history, defaultKeymap, historyKeymap, indentWithTab } from '@codemirror/commands';
 import { closeBrackets, closeBracketsKeymap, autocompletion, completionKeymap } from '@codemirror/autocomplete';
@@ -27,8 +26,8 @@ import { highlightSelectionMatches, searchKeymap } from '@codemirror/search';
 // Headings get size and weight, never underline. Links get colour, and only
 // underline on hover.
 const highlight = HighlightStyle.define([
-  { tag: t.heading1, fontSize: '1.9em', fontWeight: '700', lineHeight: '1.3', color: 'var(--text-strong)' },
-  { tag: t.heading2, fontSize: '1.5em', fontWeight: '650', lineHeight: '1.3', color: 'var(--text-strong)' },
+  { tag: t.heading1, fontSize: '1.9em', fontWeight: '900', lineHeight: '1.3', color: 'var(--text-strong)' },
+  { tag: t.heading2, fontSize: '1.5em', fontWeight: '800', lineHeight: '1.3', color: 'var(--accent)' },
   { tag: t.heading3, fontSize: '1.25em', fontWeight: '600', color: 'var(--text-strong)' },
   { tag: [t.heading4, t.heading5, t.heading6], fontSize: '1.05em', fontWeight: '600', color: 'var(--text-strong)' },
   { tag: t.strong, fontWeight: '680', color: 'var(--text-strong)' },
@@ -205,43 +204,6 @@ class CalloutWidget extends WidgetType {
   ignoreEvent() { return false; }
 }
 
-class FrontmatterWidget extends WidgetType {
-  eq() { return true; }
-  toDOM() {
-    const el = document.createElement('span');
-    el.className = 'cm-fm-fold';
-    el.textContent = 'Properties';
-    return el;
-  }
-  ignoreEvent() { return false; }
-}
-
-// --- frontmatter fold -------------------------------------------------------
-// This decoration spans line breaks, which CodeMirror only allows from a
-// StateField; a ViewPlugin throws at runtime.
-const frontmatterFold = StateField.define({
-  create(state) { return foldRange(state); },
-  update(value, tr) { return tr.docChanged || tr.selection ? foldRange(tr.state) : value; },
-  provide: (f) => EditorView.decorations.from(f),
-});
-
-function foldRange(state) {
-  if (state.doc.line(1).text.trim() !== '---') return Decoration.none;
-  let end = 0;
-  for (let n = 2; n <= Math.min(state.doc.lines, 200); n++) {
-    if (state.doc.line(n).text.trim() === '---') { end = n; break; }
-  }
-  if (!end) return Decoration.none;
-  const last = state.doc.line(end);
-  for (const r of state.selection.ranges) {
-    if (r.from <= last.to) return Decoration.none; // cursor is in or above it
-  }
-  return Decoration.set([
-    Decoration.replace({ widget: new FrontmatterWidget(), block: true })
-      .range(state.doc.line(1).from, last.to),
-  ]);
-}
-
 // --- live preview -----------------------------------------------------------
 
 const WIKI_RE = /(!?)\[\[([^\]|#^]+)(?:[#^]([^\]|]*))?(?:\|([^\]]*))?\]\]/g;
@@ -279,26 +241,26 @@ function livePreview(ctx) {
       // These replace a line's content but never its line break, and they are
       // inline decorations styled `display:block` - CodeMirror reserves real
       // block decorations for StateFields and throws if a plugin emits one.
+      // On the cursor line the media stays put and its source shows above it,
+      // so arrowing past an image does not make the page jump.
       for (let n = 1; n <= state.doc.lines; n++) {
         const line = state.doc.line(n);
-        if (!line.text.trim() || cursorLines.has(n)) continue;
+        if (!line.text.trim()) continue;
+        const show = (widget) => {
+          marks.push(cursorLines.has(n)
+            ? [line.to, line.to, Decoration.widget({ widget, side: 1 })]
+            : [line.from, line.to, Decoration.replace({ widget })]);
+          consumed.push([line.from, line.to]);
+        };
         const forced = line.text.match(EMBED_LINE_RE);
         const bare = line.text.match(URL_LINE_RE);
         if (forced || bare) {
-          const url = (forced || bare)[1];
-          marks.push([line.from, line.to,
-            Decoration.replace({ widget: new EmbedWidget(url, !!forced) })]);
-          consumed.push([line.from, line.to]);
+          show(new EmbedWidget((forced || bare)[1], !!forced));
           continue;
         }
         const md = line.text.trim().match(/^!\[([^\]]*)\]\(([^)\s]+)\)$/);
         const wiki = line.text.trim().match(/^!\[\[([^\]]+)\]\]$/);
-        if (md || wiki) {
-          marks.push([line.from, line.to, Decoration.replace({
-            widget: new ImageWidget(md ? md[2] : wiki[1], md ? md[1] : '', ctx.asset),
-          })]);
-          consumed.push([line.from, line.to]);
-        }
+        if (md || wiki) show(new ImageWidget(md ? md[2] : wiki[1], md ? md[1] : '', ctx.asset));
       }
 
       const claimed = (from, to) => consumed.some(([f, t]) => from >= f && to <= t);
@@ -435,6 +397,72 @@ function livePreview(ctx) {
   }, { decorations: (v) => v.decorations });
 }
 
+// --- "you can write here" cues ----------------------------------------------
+// A blank page gives no hint that it takes typing. The empty line under the
+// cursor says what to do, and the end of the page always offers one more line.
+
+class HintWidget extends WidgetType {
+  eq() { return true; }
+  toDOM() {
+    const el = document.createElement('span');
+    el.className = 'cm-line-hint';
+    el.textContent = 'Type here, or press / for headings, lists, pictures\u2026';
+    return el;
+  }
+}
+
+class MoreWidget extends WidgetType {
+  eq() { return true; }
+  toDOM(view) {
+    const el = document.createElement('div');
+    el.className = 'cm-keep-writing';
+    el.textContent = '\u270F\uFE0F  Click to keep writing';
+    el.onmousedown = (e) => { e.preventDefault(); newLineAtEnd(view); };
+    return el;
+  }
+  ignoreEvent() { return true; }
+}
+
+function newLineAtEnd(view) {
+  const { doc } = view.state;
+  const last = doc.line(doc.lines);
+  const insert = last.text.trim() ? '\n' : '';
+  view.dispatch({
+    changes: { from: doc.length, insert },
+    selection: { anchor: doc.length + insert.length },
+    scrollIntoView: true,
+  });
+  view.focus();
+}
+
+const writingCues = ViewPlugin.fromClass(class {
+  constructor(view) { this.decorations = this.build(view); }
+  update(u) {
+    if (u.docChanged || u.selectionSet || u.focusChanged) this.decorations = this.build(u.view);
+  }
+  build(view) {
+    const { state } = view;
+    const b = new RangeSetBuilder();
+    const head = state.selection.main;
+    const line = state.doc.lineAt(head.head);
+    const last = state.doc.line(state.doc.lines);
+    if (view.hasFocus && head.empty && !line.text.trim() && state.doc.length) {
+      b.add(line.from, line.from, Decoration.widget({ widget: new HintWidget(), side: 1 }));
+    }
+    if (state.doc.length && !(view.hasFocus && line.number === last.number)) {
+      b.add(last.to, last.to, Decoration.widget({ widget: new MoreWidget(), side: 2, block: false }));
+    }
+    return b.finish();
+  }
+}, { decorations: (v) => v.decorations });
+
+// Short pages read big and friendly; the text eases to its normal size as the
+// page fills up, so a long page still fits on screen.
+function fillScale(doc) {
+  const t = Math.min(1, Math.max(0, (doc.length - 150) / 2500));
+  return (1.2 - 0.2 * t).toFixed(2);
+}
+
 // --- slash menu -------------------------------------------------------------
 
 const BLOCKS = [
@@ -534,7 +562,10 @@ function slashMenu(view, opts) {
 // --- theme ------------------------------------------------------------------
 
 const theme = EditorView.theme({
-  '&': { fontSize: 'var(--editor-size)', height: '100%', background: 'transparent', color: 'var(--text)' },
+  '&': {
+    fontSize: 'calc(var(--editor-size) * var(--fill-scale, 1))',
+    height: '100%', background: 'transparent', color: 'var(--text)',
+  },
   '.cm-scroller': {
     fontFamily: 'var(--font-text)', lineHeight: 'var(--editor-leading)',
     padding: '0 0 45vh', overflowX: 'hidden',
@@ -576,14 +607,16 @@ export function createEditor(parent, opts) {
     exists: opts.exists || (() => true),
     asset: opts.asset || ((s) => s),
   };
-  const save = debounce(() => opts.onChange(view.state.doc.toString()), 400);
+  // The editor holds only the body. Frontmatter is edited in the properties
+  // panel and carried along here untouched, so the cursor never falls into it.
+  let prefix = opts.prefix || '';
+  const save = debounce(() => opts.onChange(prefix + view.state.doc.toString()), 400);
   let slash = null;
 
   const view = new EditorView({
     parent,
     state: EditorState.create({
       doc: opts.doc || '',
-      selection: { anchor: Math.min(opts.cursor || 0, (opts.doc || '').length) },
       extensions: [
         history(),
         drawSelection(),
@@ -599,21 +632,20 @@ export function createEditor(parent, opts) {
           indentWithTab, ...closeBracketsKeymap, ...defaultKeymap,
           ...historyKeymap, ...foldKeymap, ...completionKeymap, ...searchKeymap,
         ]),
-        yamlFrontmatter({
-          content: markdown({ base: markdownLanguage, codeLanguages: languages, addKeymap: true }),
-        }),
+        markdown({ base: markdownLanguage, codeLanguages: languages, addKeymap: true }),
         syntaxHighlighting(highlight),
         indentUnit.of('  '),
         EditorView.lineWrapping,
-        placeholder("Write, [[link]] a note, or press '/' for blocks"),
-        frontmatterFold,
+        placeholder('Start writing here…  Type / to add a heading, list, picture and more'),
         livePreview(ctx),
+        writingCues,
         theme,
         Prec.high(keymap.of([
           { key: 'Mod-s', run: () => { save.flush(); return true; } },
         ])),
         EditorView.updateListener.of((u) => {
           if (!u.docChanged) return;
+          parent.style.setProperty('--fill-scale', fillScale(u.state.doc));
           save();
           if (slash) return;
           // Open the block menu on "/" at the start of a line or after a space.
@@ -647,7 +679,13 @@ export function createEditor(parent, opts) {
             attach(files, view, opts);
             return true;
           },
-          mousedown(e) {
+          mousedown(e, view) {
+            // A click in the blank space under the text starts a new line there.
+            if (!e.target.closest('.cm-content') && e.clientY > view.contentDOM.getBoundingClientRect().bottom - 40) {
+              e.preventDefault();
+              newLineAtEnd(view);
+              return true;
+            }
             const link = e.target.closest('.cm-wikilink');
             if (link) { e.preventDefault(); opts.onLink(link.dataset.link); return true; }
             const card = e.target.closest('[data-open]');
@@ -659,17 +697,28 @@ export function createEditor(parent, opts) {
     }),
   });
 
+  parent.style.setProperty('--fill-scale', fillScale(view.state.doc));
+  // The empty space below the text belongs to the host, not the editor, so it
+  // needs its own listener to hand clicks over.
+  parent.addEventListener('mousedown', (e) => {
+    if (e.target !== parent) return;
+    e.preventDefault();
+    newLineAtEnd(view);
+  });
+
   return {
     view,
-    get value() { return view.state.doc.toString(); },
+    get value() { return prefix + view.state.doc.toString(); },
     flush: () => save.flush(),
-    setDoc(doc) {
+    setDoc(doc, nextPrefix = prefix) {
       save.cancel();
+      prefix = nextPrefix;
       view.dispatch({
         changes: { from: 0, to: view.state.doc.length, insert: doc },
         selection: { anchor: 0 },
       });
     },
+    setNote(note) { this.setDoc(note.body, note.raw.slice(0, note.raw.length - note.body.length)); },
     insert(text) {
       const { from, to } = view.state.selection.main;
       view.dispatch({ changes: { from, to, insert: text }, selection: { anchor: from + text.length } });
@@ -688,7 +737,8 @@ async function attach(files, view, opts) {
       const saved = await opts.onAttach(file);
       if (!saved) continue;
       const media = /^(image|video|audio)\//.test(file.type) || IMAGE_EXT.test(saved.name);
-      const link = media ? `![[${saved.name}]]` : `[${saved.name}](${encodeURI(saved.path)})`;
+      // Full vault path, not the basename: two folders can hold a file of the same name.
+      const link = media ? `![[${saved.path}]]` : `[${saved.name}](${encodeURI(saved.path)})`;
       const head = view.state.selection.main;
       const before = head.from > 0 && !/\s/.test(view.state.sliceDoc(head.from - 1, head.from));
       const insert = (before ? '\n' : '') + link + '\n';

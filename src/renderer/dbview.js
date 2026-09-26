@@ -158,7 +158,7 @@ export class DatabaseView {
     const fm = Object.keys(props).length
       ? '---\n' + Object.entries(props).map(([k, v]) => `${k}: ${Array.isArray(v) ? '[' + v.join(', ') + ']' : v}`).join('\n') + '\n---\n\n'
       : '';
-    const note = await window.newEra.note.create(folder + 'Untitled', fm + '# Untitled\n\n');
+    const note = await window.newEra.note.create(folder + 'Untitled', fm);
     await this.render();
     this.app.openNote(note.path);
   }

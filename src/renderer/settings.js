@@ -6,18 +6,18 @@ import { label as keyLabel, fromEvent } from './keymap.js';
 
 export const DEFAULTS = {
   theme: 'dark',
-  accent: '#2383e2',
-  fontText: 'system',
-  editorSize: 16,
+  accent: '#f2643c',
+  fontText: 'rounded',
+  editorSize: 17,
   editorLeading: 1.7,
   noteWidth: 760,
   coverHeight: 180,
-  sidebarWidth: 250,
+  sidebarWidth: 270,
   highlight: '#e0c04e',
   newNoteFolder: '',
   attachmentMode: 'subfolder',
   attachmentFolder: 'attachments',
-  showAttachments: false,
+  showAttachments: true,
   collapsed: null,
   dailyFolder: 'Daily',
   keys: {},
@@ -26,13 +26,14 @@ export const DEFAULTS = {
 };
 
 const FONTS = {
+  rounded: '"Nunito Variable", ui-rounded, "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif',
   system: 'ui-sans-serif, "Segoe UI Variable Text", "Segoe UI", -apple-system, system-ui, sans-serif',
   inter: 'Inter, ui-sans-serif, "Segoe UI Variable Text", "Segoe UI", system-ui, sans-serif',
   serif: 'Iowan Old Style, Charter, Georgia, "Times New Roman", serif',
   mono: 'var(--font-mono)',
 };
 
-const ACCENTS = ['#2383e2', '#7c9cff','#8b7cf6', '#ec6a9c', '#f08c4b', '#3fb984', '#48b0d0', '#c9a227', '#d1495b'];
+const ACCENTS = ['#f2643c', '#e8457c', '#8b5cf6', '#3b82f6', '#0ea5a4', '#22a55b', '#e0a106', '#2383e2'];
 const HIGHLIGHTS = ['#e0c04e', '#7ad17a', '#69b7e8', '#e08ab8', '#c79bf0', '#e0885a'];
 
 // What the omni-search and the settings filter look through. Keywords are the

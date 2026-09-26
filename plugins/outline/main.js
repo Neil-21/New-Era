@@ -26,7 +26,6 @@ export default {
 
         // Normalise so a note starting at ## does not render indented.
         const top = Math.min(...heads.map((x) => x.level));
-        const offset = note.raw.length - note.body.length;
 
         for (const head of heads) {
           el.append(h('a', {
@@ -35,11 +34,9 @@ export default {
             onclick: () => {
               const editor = api.app.editor();
               if (!editor) return;
-              const lineNo = head.line + 1;
+              // The editor holds the body only, so body line numbers map directly.
               const doc = editor.view.state.doc;
-              const before = doc.lineAt(Math.min(offset, doc.length)).number - 1;
-              const target = Math.min(doc.lines, before + lineNo);
-              const pos = doc.line(target).from;
+              const pos = doc.line(Math.min(doc.lines, head.line + 1)).from;
               editor.view.dispatch({ selection: { anchor: pos }, scrollIntoView: true });
               editor.view.focus();
             },

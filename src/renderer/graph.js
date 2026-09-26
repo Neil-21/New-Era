@@ -6,12 +6,16 @@
 // of the loop does not change.
 import { h } from './dbview.js';
 
-const REPULSION = 5200;
-const SPRING = 0.0085;
-const SPRING_LEN = 78;
-const CENTER = 0.0016;
-const DAMPING = 0.86;
-const MAX_STEP = 14;
+// Gentle, linear forces and real friction: the layout settles in about two
+// seconds instead of orbiting. Centre pull is a plain fraction of the distance;
+// scaling it by window size is what crushed everything into a clump before.
+const REPULSION = 2600;
+const SPRING = 0.04;
+const SPRING_LEN = 90;
+const CENTER = 0.012;
+const DAMPING = 0.6;
+const COOLING = 0.975;
+const MAX_STEP = 18;
 
 function hue(seed) {
   let n = 0;
@@ -34,6 +38,8 @@ export class GraphView {
     this.hover = null;
     this.drag = null;
     this.alpha = 1;
+    // Fit to the screen while settling, until the user pans or zooms.
+    this.userMoved = false;
     this.render();
   }
 
@@ -63,20 +69,23 @@ export class GraphView {
     });
     return h('div', { class: 'db-toolbar' }, [
       h('div', { class: 'db-title' }, [
-        h('span', { class: 'db-icon', text: '◍' }),
-        h('span', { class: 'db-name-static', text: 'Graph' }),
+        h('span', { class: 'db-icon', text: '\u{1F578}\uFE0F' }),
+        h('span', { class: 'db-name-static', text: 'Map of notes' }),
         h('span', { class: 'db-source graph-count' }),
       ]),
-      h('div', { class: 'db-tabs' }, [seg('global', 'whole vault'), seg('local', 'this note')]),
+      h('div', { class: 'db-tabs' }, [seg('global', 'Everything'), seg('local', 'Around this page')]),
       h('div', { class: 'db-actions' }, [
         h('label', { class: 'graph-toggle' }, [
           h('input', {
             type: 'checkbox', checked: this.showTags,
             onchange: (e) => { this.showTags = e.target.checked; this.reload(); },
           }),
-          h('span', { text: 'tags' }),
+          h('span', { text: 'Show tags' }),
         ]),
-        h('button', { class: 'btn', text: 'Re-centre', onclick: () => this.recentre() }),
+        h('button', {
+          class: 'btn', text: 'Fit to screen',
+          onclick: () => { this.userMoved = false; this.recentre(); },
+        }),
       ]),
     ]);
   }
@@ -124,15 +133,16 @@ export class GraphView {
         y: old ? old.y : hgt / 2 + Math.sin(angle) * (60 + nodes.length * 1.6),
         vx: 0,
         vy: 0,
-        r: 4 + Math.min(11, Math.sqrt(n.degree) * 2.6),
+        r: 7 + Math.min(12, Math.sqrt(n.degree) * 3),
       };
     });
     const byId = new Map(this.nodes.map((n) => [n.id, n]));
     this.edges = edges.map((e) => ({ a: byId.get(e.s), b: byId.get(e.t) })).filter((e) => e.a && e.b);
     this.byId = byId;
     const count = this.host.querySelector('.graph-count');
-    if (count) count.textContent = `${this.nodes.length} notes · ${this.edges.length} links`;
+    if (count) count.textContent = `${this.nodes.length} pages · ${this.edges.length} links`;
     this.alpha = 1;
+    this.userMoved = false;
   }
 
   resize() {
@@ -182,6 +192,7 @@ export class GraphView {
       if (this.drag) {
         this.drag.moved = true;
         if (this.drag.pan) {
+          this.userMoved = true;
           this.ox += e.clientX - this.drag.x;
           this.oy += e.clientY - this.drag.y;
           this.drag.x = e.clientX;
@@ -215,6 +226,7 @@ export class GraphView {
 
     c.addEventListener('wheel', (e) => {
       e.preventDefault();
+      this.userMoved = true;
       const box = c.getBoundingClientRect();
       const mx = e.clientX - box.left;
       const my = e.clientY - box.top;
@@ -241,8 +253,8 @@ export class GraphView {
       minX = Math.min(minX, n.x); maxX = Math.max(maxX, n.x);
       minY = Math.min(minY, n.y); maxY = Math.max(maxY, n.y);
     }
-    const pad = 70;
-    this.scale = Math.min(2.2, Math.min(
+    const pad = 90;
+    this.scale = Math.min(1.8, Math.min(
       this.w / Math.max(1, maxX - minX + pad * 2),
       this.hgt / Math.max(1, maxY - minY + pad * 2)));
     this.ox = this.w / 2 - ((minX + maxX) / 2) * this.scale;
@@ -275,23 +287,21 @@ export class GraphView {
       const dy = e.b.y - e.a.y;
       const d = Math.hypot(dx, dy) || 1;
       const f = (d - SPRING_LEN) * SPRING;
-      const fx = (dx / d) * f * d * 0.06;
-      const fy = (dy / d) * f * d * 0.06;
+      const fx = (dx / d) * f;
+      const fy = (dy / d) * f;
       e.a.vx += fx; e.a.vy += fy;
       e.b.vx -= fx; e.b.vy -= fy;
     }
-    const cx = this.w / 2;
-    const cy = this.hgt / 2;
+    const cx = (this.w || 800) / 2;
+    const cy = (this.hgt || 600) / 2;
     for (const n of ns) {
-      n.vx += (cx - n.x) * CENTER * (this.w || 800);
-      n.vy += (cy - n.y) * CENTER * (this.hgt || 600);
-      n.vx *= DAMPING;
-      n.vy *= DAMPING;
+      n.vx = (n.vx + (cx - n.x) * CENTER) * DAMPING;
+      n.vy = (n.vy + (cy - n.y) * CENTER) * DAMPING;
       if (n.pinned) { n.vx = 0; n.vy = 0; continue; }
       n.x += Math.max(-MAX_STEP, Math.min(MAX_STEP, n.vx * this.alpha));
       n.y += Math.max(-MAX_STEP, Math.min(MAX_STEP, n.vy * this.alpha));
     }
-    this.alpha = Math.max(0.02, this.alpha * 0.992);
+    this.alpha = Math.max(0.02, this.alpha * COOLING);
   }
 
   neighbours(node) {
@@ -355,7 +365,7 @@ export class GraphView {
 
     // Labels only when zoomed in enough to read them, or on hover.
     if (this.scale > 0.75 || this.hover) {
-      ctx.font = `${11 / this.scale + 1}px ${css.getPropertyValue('--font-text') || 'sans-serif'}`;
+      ctx.font = `700 ${13 / this.scale}px ${css.getPropertyValue('--font-text') || 'sans-serif'}`;
       ctx.textAlign = 'center';
       ctx.fillStyle = text;
       for (const n of this.nodes) {
@@ -363,7 +373,7 @@ export class GraphView {
         if (!lit && this.scale <= 0.75) continue;
         ctx.globalAlpha = lit ? 0.9 : 0.15;
         const label = n.title.length > 24 ? n.title.slice(0, 23) + '…' : n.title;
-        ctx.fillText(label, n.x, n.y + n.r + 12 / this.scale + 2);
+        ctx.fillText(label, n.x, n.y + n.r + 16 / this.scale);
       }
     }
 
@@ -373,7 +383,10 @@ export class GraphView {
 
   loop() {
     if (this.stopped || !this.canvas.isConnected) return;
-    if (this.alpha > 0.03 || this.drag) this.step();
+    if (this.alpha > 0.03 || this.drag) {
+      this.step();
+      if (!this.userMoved && !this.drag) this.recentre();
+    }
     this.paint();
     this.raf = requestAnimationFrame(() => this.loop());
   }

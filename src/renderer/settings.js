@@ -46,7 +46,7 @@ const THEMES = [
 ];
 
 // Whole-window zoom, so every button and label scales together.
-const UI_SCALES = [[0.8, 'Compact'], [0.9, 'Small'], [1, 'Normal'], [1.1, 'Large'], [1.25, 'Extra large']];
+export const UI_SCALES = [[0.8, 'Compact'], [0.9, 'Small'], [1, 'Normal'], [1.1, 'Large'], [1.25, 'Extra large']];
 
 const ACCENTS = ['#f2643c', '#e8457c', '#8b5cf6', '#3b82f6', '#0ea5a4', '#22a55b', '#e0a106', '#2383e2'];
 const HIGHLIGHTS = ['#e0c04e', '#7ad17a', '#69b7e8', '#e08ab8', '#c79bf0', '#e0885a'];
@@ -120,6 +120,16 @@ export class Settings {
       this.app.renderTabs();
       this.app.renderSidebar();
     }
+  }
+
+  // Ctrl+= / Ctrl+- / Ctrl+0, and the size picker: one step along UI_SCALES.
+  stepScale(dir) {
+    const steps = UI_SCALES.map(([v]) => v);
+    const now = Number(this.values.uiScale) || 1;
+    const at = steps.reduce((best, v, i) => (Math.abs(v - now) < Math.abs(steps[best] - now) ? i : best), 0);
+    const next = dir === 0 ? 1 : steps[Math.max(0, Math.min(steps.length - 1, at + dir))];
+    this.set({ uiScale: next });
+    return UI_SCALES.find(([v]) => v === next)[1];
   }
 
   reset() {

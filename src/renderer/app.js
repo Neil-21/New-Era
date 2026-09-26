@@ -4,7 +4,7 @@ import { createEditor } from './editor.js';
 import { DatabaseView, h } from './dbview.js';
 import { PluginHost } from './plugins.js';
 import { renderPageHeader } from './page.js';
-import { Settings } from './settings.js';
+import { Settings, UI_SCALES } from './settings.js';
 import { GraphView } from './graph.js';
 import { Keymap } from './keymap.js';
 import { Omni } from './omni.js';
@@ -127,6 +127,10 @@ class App {
         h('div', { class: 'sidebar-foot' }, [
           this.el.vaultMark = h('span', { class: 'vault-mark' }),
           this.el.vaultName,
+          h('button', {
+            class: 'icon-btn size-btn', text: 'Aa', title: 'Make everything bigger or smaller (Ctrl + = / Ctrl + −)',
+            onclick: (e) => this.sizePicker(e.currentTarget),
+          }),
           h('button', {
             class: 'icon-btn', text: '⚙️', title: 'Settings',
             onclick: () => this.openSettings(),
@@ -1078,6 +1082,9 @@ class App {
       { id: 'tab.prev', name: 'Previous tab', run: () => this.cycleTab(-1) },
       { id: 'view.localGraph', name: 'Local graph of this note', run: () => this.openGraph('local') },
       { id: 'app.settings', name: 'Open settings', run: () => this.openSettings() },
+      { id: 'ui.bigger', name: 'Make everything bigger', run: () => this.toast('App size: ' + this.settings.stepScale(1)) },
+      { id: 'ui.smaller', name: 'Make everything smaller', run: () => this.toast('App size: ' + this.settings.stepScale(-1)) },
+      { id: 'ui.reset', name: 'Normal app size', run: () => this.toast('App size: ' + this.settings.stepScale(0)) },
       { id: 'view.sidebar', name: 'Toggle sidebar', run: () => this.toggleSidebar() },
       { id: 'note.cover', name: 'Add or change page cover', run: () => {
         const btn = document.querySelector('.page-adders .add-btn:last-child, .cover-tools .chip-btn');
@@ -1208,6 +1215,26 @@ class App {
     if (!highlight) this.el.content.querySelector('.set-main').scrollTop = keep;
     this.renderTabs();
     this.renderSidebar();
+  }
+
+  // App size, reachable from every screen: the Aa button by the vault name.
+  sizePicker(anchor) {
+    const pop = this.popover(anchor, [
+      h('div', { class: 'pop-head' }, [h('span', { text: 'App size' })]),
+      h('div', { class: 'size-pick' }, UI_SCALES.map(([v, label], i) => h('button', {
+        class: 'size-opt' + (Number(this.settings.values.uiScale) === v ? ' is-active' : ''),
+        title: label,
+        onclick: (e) => {
+          this.settings.set({ uiScale: v });
+          for (const b of e.currentTarget.parentNode.children) b.classList.toggle('is-active', b === e.currentTarget);
+          pop.querySelector('.size-name').textContent = label;
+        },
+      }, [h('span', { class: 'size-a', text: 'A', style: `font-size:${12 + i * 4}px` })]))),
+      h('div', { class: 'size-foot' }, [
+        h('span', { class: 'size-name', text: (UI_SCALES.find(([v]) => v === Number(this.settings.values.uiScale)) || [0, 'Normal'])[1] }),
+        h('span', { class: 'size-keys', text: 'Ctrl + = / \u2212 / 0' }),
+      ]),
+    ]);
   }
 
   toggleSidebar() {
